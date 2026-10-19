@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "social-pipeline",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "social_pipeline",
+      // Replace with the id printed by: npx wrangler d1 create social_pipeline
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "social-pipeline-media" }],
+  "triggers": { "crons": ["0 2 * * *"] },
+  "vars": {
+    // e.g. "yourteam.cloudflareaccess.com" — required in production
+    "ACCESS_TEAM_DOMAIN": "",
+    // Application Audience (AUD) tag from the Access application
+    "ACCESS_AUD": ""
+  },
+  "observability": { "enabled": true }
+}
