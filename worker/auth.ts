@@ -3,7 +3,7 @@ import { getSignedCookie, setSignedCookie, deleteCookie } from "hono/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { AppEnv, Profile } from "./env";
 import { bad } from "./util";
-import { ROLES, type Role } from "../shared/rules";
+import { isAdmin, isMember } from "../shared/rules";
 
 const COOKIE = "sp_session";
 const SESSION_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -37,15 +37,6 @@ export const requireAccess = createMiddleware<AppEnv>(async (c, next) => {
   return next();
 });
 
-export function parseRoles(raw: string): Role[] {
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.filter((r): r is Role => ROLES.includes(r)) : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Requires a valid profile session (set after PIN entry). */
 export const requireProfile = createMiddleware<AppEnv>(async (c, next) => {
   const raw = await getSignedCookie(c, c.env.SESSION_SECRET, COOKIE);
@@ -53,12 +44,23 @@ export const requireProfile = createMiddleware<AppEnv>(async (c, next) => {
   const [idStr, expStr] = raw.split(".");
   if (Number(expStr) < Date.now()) bad("Session expired", 401);
   const row = await c.env.DB.prepare(
-    "SELECT id, name, avatar_color, roles, email FROM profiles WHERE id = ? AND active = 1",
+    "SELECT id, name, avatar_color, role, email FROM profiles WHERE id = ? AND active = 1",
   )
     .bind(Number(idStr))
-    .first<Omit<Profile, "roles"> & { roles: string }>();
+    .first<Profile>();
   if (!row) bad("Profile not found", 401);
-  c.set("profile", { ...row, roles: parseRoles(row.roles) });
+  c.set("profile", row);
+  return next();
+});
+
+/** Content work is for members only; admins just administer. */
+export const requireMember = createMiddleware<AppEnv>(async (c, next) => {
+  if (!isMember(c.get("profile"))) bad("Admins manage settings only. Sign in as a member to work on content.", 403);
+  return next();
+});
+
+export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
+  if (!isAdmin(c.get("profile"))) bad("Admins only", 403);
   return next();
 });
 

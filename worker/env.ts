@@ -14,7 +14,7 @@ export interface Profile {
   id: number;
   name: string;
   avatar_color: string;
-  roles: Role[];
+  role: Role;
   email: string | null;
 }
 

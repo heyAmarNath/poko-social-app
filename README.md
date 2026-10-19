@@ -6,13 +6,16 @@ Everything runs on the Cloudflare free plan as one Worker: API and UI on the Wor
 
 ## Features
 
-- **Profiles with 4-digit PINs** behind Cloudflare Access login. Roles are admin, manager, writer and creative, and one person can hold several.
-- **Platforms and accounts**. Platforms are editable: character limit, colour, and extra fields such as Subreddit for Reddit or Channel for Discord.
+- **Profiles with 4-digit PINs** behind Cloudflare Access login. There are two kinds of profile:
+  - **Admin** only administers: people, accounts, assignments, platforms and backups. Admins never see or edit content.
+  - **Member** does all content work: write, add media, review, schedule and mark posted.
+- **Accounts** are a brand or person, with their handle on every platform filled in from one form.
+- **Platforms** are editable: show or hide, character limit, colour, and extra fields such as Subreddit for Reddit or Channel for Discord. Hidden platforms disappear from account forms, filters and the post editor.
 - **Posts** have one main text plus optional custom text per account. Each account on a post has its own time, manager and status.
-- **Status flow**: not ready, working, waiting for review, changes requested, scheduled, posted, cancelled. Permissions are enforced on the server.
+- **Status flow**: not ready, working, waiting for review, changes requested, scheduled, posted, cancelled. The server enforces valid moves.
 - **Media**: file uploads up to 95 MB with drag-drop or paste, plus links for large files on Drive or Dropbox.
-- **Views**: Day with a date picker, Week, Board with drag-and-drop, and My work. There are overdue and unassigned banners.
-- **Admin**: people, accounts, platforms, and an assignment matrix. The matrix sets who manages, writes and creates for each account, and it auto-fills new posts.
+- **Views**: Day with a date picker, Board with drag-and-drop, and My work. The sidebar flags overdue posts and posts without a manager.
+- **Assignments**: a matrix that sets which member posts, writes and makes media for each account. It auto-fills new posts.
 - Comments, change history, duplicate post, copy and media due dates, and live post URL after posting.
 
 ## Local development
@@ -26,7 +29,7 @@ npm run db:seed:local
 npm run dev
 ```
 
-Open http://localhost:5173 and pick **Admin** with PIN **0000**.
+Open http://localhost:5173 and pick **Admin** with PIN **0000**. Add at least one member under **People**, then sign in as that member to create posts.
 
 `DEV_BYPASS_EMAIL` in `.dev.vars` skips Cloudflare Access. It only works on localhost.
 
@@ -57,7 +60,7 @@ Open http://localhost:5173 and pick **Admin** with PIN **0000**.
    - Add a policy that allows your team's emails, or your Google Workspace domain. The free plan covers up to 50 users.
    - Copy the application's **Audience (AUD) tag** and your team domain, such as `yourteam.cloudflareaccess.com`.
    - Put both into `vars` in `wrangler.jsonc` and run `npm run deploy` again.
-6. Sign in as **Admin / 0000** and change the PIN at once from the avatar menu. Then add people, accounts and assignments under **Admin**.
+6. Sign in as **Admin / 0000** and change the PIN at once from the profile menu. Then add members, accounts and assignments.
 
 ## Backups
 
@@ -80,5 +83,5 @@ shared/rules.ts     statuses, transitions, role permissions (used by API and UI)
 worker/             Hono API, Access + PIN auth, R2 media, backup cron
 migrations/         D1 schema
 scripts/seed.sql    platforms and the first admin
-web/src/            React app (pages/, components/, lib/)
+web/src/            React app on shadcn/ui (pages/, components/, components/ui/ is shadcn)
 ```

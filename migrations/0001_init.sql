@@ -6,7 +6,7 @@ CREATE TABLE profiles (
   avatar_color TEXT NOT NULL DEFAULT '#6366f1',
   pin_hash TEXT NOT NULL,
   pin_salt TEXT NOT NULL,
-  roles TEXT NOT NULL DEFAULT '[]',          -- JSON array of role keys
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
   email TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   failed_attempts INTEGER NOT NULL DEFAULT 0,
@@ -21,7 +21,7 @@ CREATE TABLE platforms (
   char_limit INTEGER,
   extra_fields TEXT NOT NULL DEFAULT '[]',   -- JSON [{key,label}]
   color TEXT NOT NULL DEFAULT '#64748b',
-  active INTEGER NOT NULL DEFAULT 1,
+  visible INTEGER NOT NULL DEFAULT 1,       -- admin can hide a platform everywhere
   sort INTEGER NOT NULL DEFAULT 0
 );
 

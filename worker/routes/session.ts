@@ -8,7 +8,7 @@ export const session = new Hono<AppEnv>();
 /** Profile tiles for the switcher. Behind Access, but no PIN needed. */
 session.get("/profiles/public", async (c) => {
   const { results } = await c.env.DB.prepare(
-    "SELECT id, name, avatar_color FROM profiles WHERE active = 1 ORDER BY name",
+    "SELECT id, name, avatar_color, role FROM profiles WHERE active = 1 ORDER BY role DESC, name",
   ).all();
   return c.json(results);
 });

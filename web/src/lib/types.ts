@@ -1,13 +1,14 @@
 import type { Role, Status } from "../../../shared/rules";
 
-export interface Me { id: number; name: string; avatar_color: string; roles: Role[]; access_email: string }
-export interface Person { id: number; name: string; avatar_color: string; roles: Role[]; active: number; email?: string; locked_until?: number | null }
+
+export interface Me { id: number; name: string; avatar_color: string; role: Role; access_email: string }
+export interface Person { id: number; name: string; avatar_color: string; role: Role; active: number; email?: string | null; locked_until?: number | null }
 export interface ExtraField { key: string; label: string }
-export interface Platform { id: number; key: string; name: string; char_limit: number | null; extra_fields: ExtraField[]; color: string; active: number; sort: number }
+export interface Platform { id: number; key: string; name: string; char_limit: number | null; extra_fields: ExtraField[]; color: string; visible: number; sort: number }
 export interface Account {
   id: number; platform_id: number; handle: string; display_name: string | null; url: string | null;
   timezone: string | null; notes: string | null; active: number;
-  platform_name: string; platform_key: string; platform_color: string;
+  platform_name: string; platform_key: string; platform_color: string; platform_visible: number;
 }
 export interface Rule { id: number; account_id: number; role: "manager" | "creative" | "writer"; profile_id: number }
 export interface TargetRow {

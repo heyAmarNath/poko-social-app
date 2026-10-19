@@ -1,6 +1,7 @@
 // Shared domain rules used by both the Worker API and the web UI.
 
-export const ROLES = ["admin", "manager", "writer", "creative"] as const;
+/** Admins only administer (people, accounts, platforms). Members do all content work. */
+export const ROLES = ["admin", "member"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const STATUSES = [
@@ -35,45 +36,17 @@ export const TRANSITIONS: Record<Status, Status[]> = {
   cancelled: ["not_ready"],
 };
 
-/** Statuses only a manager (or admin) may set. */
-export const MANAGER_ONLY: Status[] = ["changes_requested", "scheduled", "posted", "cancelled"];
+export const OPEN_STATUSES: Status[] = ["not_ready", "working", "waiting_review", "changes_requested", "scheduled"];
 
-export interface Actor {
-  id: number;
-  roles: Role[];
-}
-
-export const hasRole = (a: Actor, ...roles: Role[]) => roles.some((r) => a.roles.includes(r));
-
-/**
- * Can `actor` move a target from `from` to `to`?
- * Managers may only act on targets they manage, or unassigned ones.
- */
-export function canTransition(
-  actor: Actor,
-  from: Status,
-  to: Status,
-  targetManagerId: number | null,
-): { ok: true } | { ok: false; reason: string } {
+export function canTransition(from: Status, to: Status): { ok: true } | { ok: false; reason: string } {
   if (!TRANSITIONS[from].includes(to)) {
     return { ok: false, reason: `Cannot go from ${STATUS_LABEL[from]} to ${STATUS_LABEL[to]}` };
   }
-  if (hasRole(actor, "admin")) return { ok: true };
-  if (MANAGER_ONLY.includes(to) || from === "posted" || from === "cancelled") {
-    if (!hasRole(actor, "manager")) return { ok: false, reason: "Only a manager can set this status" };
-    if (targetManagerId != null && targetManagerId !== actor.id) {
-      return { ok: false, reason: "Only the assigned manager can set this status" };
-    }
-    return { ok: true };
-  }
-  if (to === "waiting_review") return { ok: true };
-  if (hasRole(actor, "manager", "writer")) return { ok: true };
-  return { ok: false, reason: "Your role cannot set this status" };
+  return { ok: true };
 }
 
-export const canEditCopy = (a: Actor) => hasRole(a, "admin", "manager", "writer");
-export const canAssign = (a: Actor) => hasRole(a, "admin", "manager");
-export const canAdmin = (a: Actor) => hasRole(a, "admin");
+export const isAdmin = (a: { role: Role }) => a.role === "admin";
+export const isMember = (a: { role: Role }) => a.role === "member";
 
 /** Rank used to derive one overall status from many targets (lowest wins). */
 const RANK: Status[] = ["not_ready", "working", "changes_requested", "waiting_review", "scheduled", "posted"];

@@ -1,17 +1,23 @@
 import { Hono, type Context } from "hono";
 import type { AppEnv } from "../env";
 import { audit, bad, body, idParam, now, optNum, optStr } from "../util";
-import {
-  canAssign,
-  canEditCopy,
-  canTransition,
-  hasRole,
-  MAX_UPLOAD_BYTES,
-  STATUSES,
-  type Status,
-} from "../../shared/rules";
+import { requireMember } from "../auth";
+import { canTransition, MAX_UPLOAD_BYTES, STATUSES, type Status } from "../../shared/rules";
 
 export const posts = new Hono<AppEnv>();
+posts.use("*", requireMember);
+
+/** Assignees (writer, creative, manager) must be active members. */
+async function assertMembers(c: Context<AppEnv>, ...ids: (number | null | undefined)[]) {
+  const list = [...new Set(ids.filter((x): x is number => typeof x === "number"))];
+  if (!list.length) return;
+  const { results } = await c.env.DB.prepare(
+    `SELECT id FROM profiles WHERE active = 1 AND role = 'member' AND id IN (${list.map(() => "?").join(",")})`,
+  )
+    .bind(...list)
+    .all<{ id: number }>();
+  if (results.length !== list.length) bad("Only active members can be assigned");
+}
 
 const OPEN = "t.status NOT IN ('posted','cancelled')";
 
@@ -142,7 +148,6 @@ function targetInsert(c: Context<AppEnv>, postId: number, t: TargetInput, rules:
 
 posts.post("/posts", async (c) => {
   const me = c.get("profile");
-  if (!canEditCopy(me)) bad("Your role cannot create posts", 403);
   const b = await body<{
     title: string;
     body?: string;
@@ -160,9 +165,9 @@ posts.post("/posts", async (c) => {
   if (accountIds.length !== targets.length) bad("Each account can only be targeted once per post");
   const rules = await rulesFor(c, accountIds);
   const firstAcc = accountIds[0];
-  const writer =
-    b.writer_id !== undefined ? optNum(b.writer_id) : hasRole(me, "writer") ? me.id : (rules.get(`${firstAcc}:writer`) ?? null);
+  const writer = b.writer_id !== undefined ? optNum(b.writer_id) : (rules.get(`${firstAcc}:writer`) ?? me.id);
   const creative = b.creative_id !== undefined ? optNum(b.creative_id) : (rules.get(`${firstAcc}:creative`) ?? null);
+  await assertMembers(c, writer, creative, ...targets.map((t) => optNum(t.manager_id)));
   const t = now();
   const post = await c.env.DB.prepare(
     `INSERT INTO posts (title, body, notes, created_by, writer_id, creative_id, copy_due, media_due, created_at, updated_at)
@@ -177,7 +182,6 @@ posts.post("/posts", async (c) => {
 
 posts.patch("/posts/:id", async (c) => {
   const id = idParam(c);
-  const me = c.get("profile");
   const post = await loadPost(c, id);
   const b = await body<Record<string, unknown>>(c);
   const sets: string[] = [];
@@ -186,20 +190,18 @@ posts.patch("/posts/:id", async (c) => {
   for (const f of ["title", "body", "notes"] as const) {
     const v = optStr(b[f]);
     if (v === undefined) continue;
-    if (!canEditCopy(me)) bad("Your role cannot edit copy", 403);
     if (f === "title" && !v?.trim()) bad("Title is required");
     sets.push(`${f} = ?`), vals.push(v);
   }
   for (const f of ["copy_due", "media_due"] as const) {
     const v = optNum(b[f]);
     if (v === undefined) continue;
-    if (!canEditCopy(me)) bad("Your role cannot change deadlines", 403);
     sets.push(`${f} = ?`), vals.push(v), (changes[f] = v);
   }
   for (const f of ["writer_id", "creative_id"] as const) {
     const v = optNum(b[f]);
     if (v === undefined || v === post[f]) continue;
-    if (!canAssign(me)) bad("Only managers can reassign people", 403);
+    await assertMembers(c, v);
     sets.push(`${f} = ?`), vals.push(v), (changes[f] = v);
   }
   if (!sets.length) return c.json({ ok: true });
@@ -211,9 +213,7 @@ posts.patch("/posts/:id", async (c) => {
 
 posts.delete("/posts/:id", async (c) => {
   const id = idParam(c);
-  const me = c.get("profile");
-  const post = await loadPost(c, id);
-  if (!hasRole(me, "admin", "manager") && post.created_by !== me.id) bad("Only the creator or a manager can delete", 403);
+  await loadPost(c, id);
   await c.env.DB.prepare("UPDATE posts SET deleted_at = ? WHERE id = ?").bind(now(), id).run();
   await audit(c, "post", id, "delete");
   return c.json({ ok: true });
@@ -222,7 +222,6 @@ posts.delete("/posts/:id", async (c) => {
 posts.post("/posts/:id/duplicate", async (c) => {
   const id = idParam(c);
   const me = c.get("profile");
-  if (!canEditCopy(me)) bad("Your role cannot create posts", 403);
   await loadPost(c, id);
   const t = now();
   const copy = await c.env.DB.prepare(
@@ -255,9 +254,9 @@ async function loadTarget(c: Context<AppEnv>, id: number) {
 
 posts.post("/posts/:id/targets", async (c) => {
   const id = idParam(c);
-  if (!canEditCopy(c.get("profile"))) bad("Your role cannot add platforms", 403);
   await loadPost(c, id);
   const b = await body<TargetInput>(c);
+  await assertMembers(c, optNum(b.manager_id));
   const rules = await rulesFor(c, [Number(b.account_id)]);
   try {
     await targetInsert(c, id, b, rules).run();
@@ -271,7 +270,6 @@ posts.post("/posts/:id/targets", async (c) => {
 
 posts.patch("/targets/:id", async (c) => {
   const id = idParam(c);
-  const me = c.get("profile");
   const target = await loadTarget(c, id);
   const b = await body<Record<string, unknown>>(c);
   const sets: string[] = [];
@@ -279,26 +277,22 @@ posts.patch("/targets/:id", async (c) => {
   const changes: Record<string, unknown> = { target_id: id };
   const bo = optStr(b.body_override);
   if (bo !== undefined) {
-    if (!canEditCopy(me)) bad("Your role cannot edit copy", 403);
     sets.push("body_override = ?"), vals.push(bo || null);
   }
   if (b.extra !== undefined) {
-    if (!canEditCopy(me)) bad("Your role cannot edit copy", 403);
     sets.push("extra = ?"), vals.push(JSON.stringify(b.extra ?? {}));
   }
   const sched = optNum(b.scheduled_at);
   if (sched !== undefined) {
-    if (!canEditCopy(me)) bad("Your role cannot reschedule", 403);
     sets.push("scheduled_at = ?"), vals.push(sched), (changes.scheduled_at = sched);
   }
   const mgr = optNum(b.manager_id);
   if (mgr !== undefined && mgr !== target.manager_id) {
-    if (!canAssign(me)) bad("Only managers can reassign", 403);
+    await assertMembers(c, mgr);
     sets.push("manager_id = ?"), vals.push(mgr), (changes.manager_id = mgr);
   }
   const url = optStr(b.posted_url, 1000);
   if (url !== undefined) {
-    if (!hasRole(me, "admin", "manager")) bad("Only managers can set the live URL", 403);
     sets.push("posted_url = ?"), vals.push(url || null);
   }
   if (!sets.length) return c.json({ ok: true });
@@ -309,7 +303,6 @@ posts.patch("/targets/:id", async (c) => {
 
 posts.delete("/targets/:id", async (c) => {
   const id = idParam(c);
-  if (!canEditCopy(c.get("profile"))) bad("Your role cannot remove platforms", 403);
   const target = await loadTarget(c, id);
   await c.env.DB.prepare("DELETE FROM post_targets WHERE id = ?").bind(id).run();
   await audit(c, "post", target.post_id, "remove_target", { account_id: target.account_id });
@@ -322,7 +315,7 @@ async function applyStatus(
   to: Status,
   postedUrl?: string | null,
 ) {
-  const check = canTransition(c.get("profile"), target.status, to, target.manager_id);
+  const check = canTransition(target.status, to);
   if (!check.ok) return check;
   const postedAt = to === "posted" ? now() : null;
   await c.env.DB.prepare(
@@ -345,7 +338,7 @@ posts.post("/targets/:id/status", async (c) => {
   const to = parseStatus(b.status);
   const target = await loadTarget(c, id);
   const r = await applyStatus(c, target, to, optStr(b.posted_url, 1000));
-  if (!r.ok) bad(r.reason, 403);
+  if (!r.ok) bad(r.reason, 409);
   return c.json({ ok: true });
 });
 
@@ -383,9 +376,8 @@ posts.post("/posts/:id/comments", async (c) => {
 
 posts.delete("/comments/:id", async (c) => {
   const id = idParam(c);
-  const me = c.get("profile");
-  const r = await c.env.DB.prepare("DELETE FROM comments WHERE id = ? AND (author_id = ? OR ? = 1)")
-    .bind(id, me.id, hasRole(me, "admin") ? 1 : 0)
+  const r = await c.env.DB.prepare("DELETE FROM comments WHERE id = ? AND author_id = ?")
+    .bind(id, c.get("profile").id)
     .run();
   if (!r.meta.changes) bad("Not your comment", 403);
   return c.json({ ok: true });

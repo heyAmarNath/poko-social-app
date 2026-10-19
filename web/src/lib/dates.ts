@@ -10,12 +10,6 @@ export function addDays(d: Date, n: number) {
   x.setDate(x.getDate() + n);
   return x;
 }
-/** Monday-start week. */
-export function startOfWeek(d: Date) {
-  const x = startOfDay(d);
-  const dow = (x.getDay() + 6) % 7;
-  return addDays(x, -dow);
-}
 export const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 export function parseYmd(s: string | null | undefined) {

@@ -6,7 +6,6 @@ import { session } from "./routes/session";
 import { admin, directory } from "./routes/admin";
 import { posts } from "./routes/posts";
 import { backup } from "./backup";
-import { canAdmin } from "../shared/rules";
 
 const app = new Hono<AppEnv>().basePath("/api");
 
@@ -27,11 +26,8 @@ const authed = new Hono<AppEnv>();
 authed.use("*", requireProfile);
 authed.route("/", directory);
 authed.route("/admin", admin);
+// Order matters: the posts router gates everything after it to members.
 authed.route("/", posts);
-authed.post("/admin/backup", async (c) => {
-  if (!canAdmin(c.get("profile"))) return c.json({ error: "Admins only" }, 403);
-  return c.json({ key: await backup(c.env) });
-});
 app.route("/", authed);
 
 app.all("*", (c) => c.json({ error: "Not found" }, 404));

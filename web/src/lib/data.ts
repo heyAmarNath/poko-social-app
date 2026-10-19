@@ -22,3 +22,18 @@ export function usePeopleMap() {
   const { data } = usePeople();
   return new Map((data ?? []).map((p) => [p.id, p]));
 }
+
+/** Active members, the only people who can be assigned content work. */
+export function useMembers() {
+  const { data } = usePeople();
+  return (data ?? []).filter((p) => p.active && p.role === "member");
+}
+
+/** Accounts members can post to: active and on a platform the admin has left visible. */
+export function usePostableAccounts() {
+  const { data } = useAccounts();
+  return (data ?? []).filter((a) => a.active && a.platform_visible);
+}
+
+/** Group key for an account: its account name, falling back to the handle. */
+export const accountName = (a: { display_name: string | null; handle: string }) => a.display_name || a.handle;
