@@ -1,12 +1,23 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
-import type { Account, Me, Person, Platform, Rule } from "./types";
+import type { Account, Handler, Me, Person, Platform, Template, TemplateSummary } from "./types";
 
 export const useMe = () => useQuery({ queryKey: ["me"], queryFn: () => api<Me>("/me"), retry: false });
 export const usePeople = () => useQuery({ queryKey: ["profiles"], queryFn: () => api<Person[]>("/profiles") });
 export const usePlatforms = () => useQuery({ queryKey: ["platforms"], queryFn: () => api<Platform[]>("/platforms") });
 export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: () => api<Account[]>("/accounts") });
-export const useRules = () => useQuery({ queryKey: ["rules"], queryFn: () => api<Rule[]>("/rules") });
+export const useHandlers = () => useQuery({ queryKey: ["handlers"], queryFn: () => api<Handler[]>("/handlers") });
+/** Active templates, readable by members for "start from a template". */
+export const usePostTemplates = () => useQuery({ queryKey: ["post-templates"], queryFn: () => api<TemplateSummary[]>("/templates") });
+export const useTemplates = () => useQuery({ queryKey: ["templates"], queryFn: () => api<Template[]>("/admin/templates") });
+
+/** account id -> handler profile ids */
+export function useHandlerMap() {
+  const { data } = useHandlers();
+  const m = new Map<number, number[]>();
+  for (const h of data ?? []) m.set(h.account_id, [...(m.get(h.account_id) ?? []), h.profile_id]);
+  return m;
+}
 
 /** Invalidate everything content-related after a mutation. */
 export function useRefresh() {

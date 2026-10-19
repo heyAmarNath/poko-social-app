@@ -87,7 +87,7 @@ export function DayPage() {
           {[...groups].map(([k, list]) => (
             <section key={k}>
               {groupBy === "account" && (
-                <h2 className="mb-3"><PlatformLabel color={list[0].platform_color} name={list[0].platform_name} detail={list[0].handle} /></h2>
+                <h2 className="mb-3"><PlatformLabel k={list[0].platform_key} color={list[0].platform_color} name={list[0].platform_name} detail={list[0].handle} /></h2>
               )}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {list.map((t) => <TargetCard key={t.id} t={t} />)}

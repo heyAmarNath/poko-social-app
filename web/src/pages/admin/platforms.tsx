@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
-import { PlatformDot } from "@/components/platform";
+import { PlatformIcon } from "@/components/platform";
 
 export function PlatformsPage() {
   const platforms = usePlatforms().data ?? [];
@@ -52,7 +52,7 @@ export function PlatformsPage() {
               <TableRow key={p.id}>
                 <TableCell className="pl-4"><Switch checked={!!p.visible} onCheckedChange={(v) => toggle(p, v)} aria-label={`Show ${p.name}`} /></TableCell>
                 <TableCell className={cn("font-medium", !p.visible && "text-muted-foreground")}>
-                  <span className="flex items-center gap-2"><PlatformDot color={p.color} />{p.name}</span>
+                  <span className="flex items-center gap-2"><PlatformIcon k={p.key} name={p.name} color={p.color} className="size-4" />{p.name}</span>
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{p.char_limit?.toLocaleString() ?? "No limit"}</TableCell>
                 <TableCell className="hidden text-muted-foreground md:table-cell">{p.extra_fields.map((x) => x.label).join(", ") || "—"}</TableCell>

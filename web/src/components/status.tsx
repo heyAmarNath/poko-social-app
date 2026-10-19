@@ -18,8 +18,6 @@ import { STATUS_LABEL, TRANSITIONS, type Status } from "../../../shared/rules";
 export const STATUS_DOT: Record<Status, string> = {
   not_ready: "bg-zinc-400",
   working: "bg-amber-500",
-  waiting_review: "bg-violet-500",
-  changes_requested: "bg-rose-500",
   scheduled: "bg-sky-500",
   posted: "bg-emerald-500",
   cancelled: "bg-zinc-300 dark:bg-zinc-600",

@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Clock, Paperclip } from "lucide-react";
+import { Clock, Paperclip, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePeopleMap } from "@/lib/data";
 import { fmtDateTime, fmtTime } from "@/lib/dates";
@@ -21,13 +21,16 @@ export function TargetCard({ t, compact, showDate }: { t: TargetRow; compact?: b
     <Card className={cn("relative gap-0 p-4 transition-colors hover:bg-muted/40", overdue && "ring-1 ring-destructive/50")}>
       <Link to={`/posts/${t.post_id}`} className="absolute inset-0 rounded-[inherit]" aria-label={`Open ${t.title}`} />
       <div className="flex items-center justify-between gap-2">
-        <PlatformLabel color={t.platform_color} name={t.platform_name} detail={t.handle} className="text-xs" />
+        <PlatformLabel k={t.platform_key} color={t.platform_color} name={t.platform_name} detail={t.handle} className="text-xs" />
         <span className={cn("flex shrink-0 items-center gap-1 text-xs tabular-nums", overdue ? "font-medium text-destructive" : "text-muted-foreground")}>
           <Clock className="size-3" />
           {t.scheduled_at ? (showDate ? fmtDateTime(t.scheduled_at) : fmtTime(t.scheduled_at)) : "No time"}
         </span>
       </div>
-      <div className="mt-2 font-medium leading-snug">{t.title}</div>
+      <div className="mt-2 flex items-start gap-1.5 font-medium leading-snug">
+        {t.template_id && <Repeat className="mt-1 size-3.5 shrink-0 text-muted-foreground" aria-label="Made from a template" />}
+        <span>{t.title}</span>
+      </div>
       {!compact && text && <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{text}</p>}
       <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">

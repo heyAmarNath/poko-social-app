@@ -6,6 +6,7 @@ import { session } from "./routes/session";
 import { admin, directory } from "./routes/admin";
 import { posts } from "./routes/posts";
 import { backup } from "./backup";
+import { generateTemplates, templates } from "./templates";
 
 const app = new Hono<AppEnv>().basePath("/api");
 
@@ -25,6 +26,7 @@ app.route("/", session);
 const authed = new Hono<AppEnv>();
 authed.use("*", requireProfile);
 authed.route("/", directory);
+authed.route("/admin/templates", templates);
 authed.route("/admin", admin);
 // Order matters: the posts router gates everything after it to members.
 authed.route("/", posts);
@@ -35,6 +37,6 @@ app.all("*", (c) => c.json({ error: "Not found" }, 404));
 export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(backup(env));
+    ctx.waitUntil(Promise.all([backup(env), generateTemplates(env)]));
   },
 } satisfies ExportedHandler<Env>;

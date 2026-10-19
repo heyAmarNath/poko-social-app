@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "@/components/theme-provider";
 import {
   AlertTriangle, AtSign, CalendarDays, ChevronsUpDown, DatabaseBackup, Inbox, KeyRound, KanbanSquare,
-  LayoutGrid, LogOut, Megaphone, Monitor, Moon, Plus, Sun, UserX, Users, Workflow,
+  LayoutGrid, LogOut, Megaphone, Monitor, Moon, Plus, Repeat, Sun, UserX, Users,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/data";
@@ -43,13 +43,13 @@ export function AppShell() {
   const main: NavItem[] = member
     ? [
         { to: "/day", label: "Day", icon: CalendarDays, count: d?.today },
-        { to: "/board", label: "Board", icon: KanbanSquare, count: d?.review },
+        { to: "/board", label: "Board", icon: KanbanSquare },
         { to: "/mine", label: "My work", icon: Inbox, count: d?.mine },
       ]
     : [
         { to: "/admin/people", label: "People", icon: Users },
         { to: "/admin/accounts", label: "Accounts", icon: AtSign },
-        { to: "/admin/assignments", label: "Assignments", icon: Workflow },
+        { to: "/admin/templates", label: "Templates", icon: Repeat },
         { to: "/admin/platforms", label: "Platforms", icon: LayoutGrid },
         { to: "/admin/backup", label: "Backup", icon: DatabaseBackup },
       ];
@@ -72,7 +72,7 @@ export function AppShell() {
                     <Megaphone className="size-4" />
                   </div>
                   <div className="grid flex-1 text-left leading-tight">
-                    <span className="truncate font-semibold">Social Pipeline</span>
+                    <span className="truncate font-semibold">Poko Social</span>
                     <span className="truncate text-xs text-muted-foreground">{member ? "Content" : "Administration"}</span>
                   </div>
                 </Link>

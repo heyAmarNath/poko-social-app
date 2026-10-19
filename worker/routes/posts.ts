@@ -20,9 +20,11 @@ async function assertMembers(c: Context<AppEnv>, ...ids: (number | null | undefi
 }
 
 const OPEN = "t.status NOT IN ('posted','cancelled')";
+/** Targets a person is on: as writer, creative, poster, or handler of the account. */
+const INVOLVES = "(t.manager_id = ? OR p.writer_id = ? OR p.creative_id = ? OR EXISTS (SELECT 1 FROM account_handlers h WHERE h.account_id = t.account_id AND h.profile_id = ?))";
 
 const TARGET_SELECT = `
-  SELECT t.*, p.title, p.body, p.writer_id, p.creative_id, p.copy_due, p.media_due,
+  SELECT t.*, p.title, p.body, p.writer_id, p.creative_id, p.copy_due, p.media_due, p.template_id,
          a.handle, a.display_name, a.timezone AS account_timezone, a.platform_id,
          pl.name AS platform_name, pl.key AS platform_key, pl.color AS platform_color, pl.char_limit,
          (SELECT COUNT(*) FROM attachments x WHERE x.post_id = p.id) AS attachment_count
@@ -47,13 +49,13 @@ posts.get("/targets", async (c) => {
   if (q.account_id) (where.push("t.account_id = ?"), vals.push(Number(q.account_id)));
   if (q.platform_id) (where.push("a.platform_id = ?"), vals.push(Number(q.platform_id)));
   if (q.mine === "1") {
-    where.push(`(t.manager_id = ? OR p.writer_id = ? OR p.creative_id = ?) AND ${OPEN}`);
-    vals.push(me, me, me);
+    where.push(`${INVOLVES} AND ${OPEN}`);
+    vals.push(me, me, me, me);
   }
   if (q.person) {
     const pid = Number(q.person);
-    where.push("(t.manager_id = ? OR p.writer_id = ? OR p.creative_id = ?)");
-    vals.push(pid, pid, pid);
+    where.push(INVOLVES);
+    vals.push(pid, pid, pid, pid);
   }
   const sql = `${TARGET_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""}
     ORDER BY t.scheduled_at IS NULL, t.scheduled_at, p.id LIMIT 1000`;
@@ -68,15 +70,14 @@ posts.get("/dashboard", async (c) => {
   const me = c.get("profile").id;
   const t = now();
   const base = "FROM post_targets t JOIN posts p ON p.id = t.post_id AND p.deleted_at IS NULL";
-  const [today, overdue, review, unassigned, mine] = await c.env.DB.batch<{ n: number }>([
+  const [today, overdue, unassigned, mine] = await c.env.DB.batch<{ n: number }>([
     c.env.DB.prepare(`SELECT COUNT(*) n ${base} WHERE t.scheduled_at >= ? AND t.scheduled_at < ? AND t.status != 'cancelled'`).bind(from, to),
     c.env.DB.prepare(`SELECT COUNT(*) n ${base} WHERE t.scheduled_at < ? AND ${OPEN}`).bind(t),
-    c.env.DB.prepare(`SELECT COUNT(*) n ${base} WHERE t.status = 'waiting_review'`),
     c.env.DB.prepare(`SELECT COUNT(*) n ${base} WHERE t.manager_id IS NULL AND ${OPEN} AND (t.scheduled_at IS NULL OR t.scheduled_at >= ?)`).bind(t),
-    c.env.DB.prepare(`SELECT COUNT(*) n ${base} WHERE (t.manager_id = ? OR p.writer_id = ? OR p.creative_id = ?) AND ${OPEN}`).bind(me, me, me),
+    c.env.DB.prepare(`SELECT COUNT(*) n ${base} WHERE ${INVOLVES} AND ${OPEN}`).bind(me, me, me, me),
   ]);
   const n = (r: D1Result<{ n: number }>) => r.results[0]?.n ?? 0;
-  return c.json({ today: n(today), overdue: n(overdue), review: n(review), unassigned: n(unassigned), mine: n(mine) });
+  return c.json({ today: n(today), overdue: n(overdue), unassigned: n(unassigned), mine: n(mine) });
 });
 
 async function loadPost(c: Context<AppEnv>, id: number) {
@@ -93,22 +94,20 @@ async function loadPost(c: Context<AppEnv>, id: number) {
 posts.get("/posts/:id", async (c) => {
   const id = idParam(c);
   const post = await loadPost(c, id);
-  const [targets, attachments, comments, history] = await c.env.DB.batch([
+  const [targets, attachments, comments, tpl] = await c.env.DB.batch([
     c.env.DB.prepare(`${TARGET_SELECT} WHERE t.post_id = ? ORDER BY pl.sort, a.handle`).bind(id),
     c.env.DB.prepare("SELECT * FROM attachments WHERE post_id = ? ORDER BY created_at").bind(id),
     c.env.DB.prepare(
       "SELECT cm.*, pr.name AS author_name, pr.avatar_color AS author_color FROM comments cm LEFT JOIN profiles pr ON pr.id = cm.author_id WHERE post_id = ? ORDER BY created_at",
     ).bind(id),
-    c.env.DB.prepare(
-      "SELECT l.*, pr.name AS actor_name FROM audit_log l LEFT JOIN profiles pr ON pr.id = l.actor_id WHERE entity = 'post' AND entity_id = ? ORDER BY created_at DESC LIMIT 100",
-    ).bind(id),
+    c.env.DB.prepare("SELECT t.title FROM templates t JOIN posts p ON p.template_id = t.id WHERE p.id = ?").bind(id),
   ]);
   return c.json({
     ...post,
     targets: targets.results,
     attachments: attachments.results,
     comments: comments.results,
-    history: history.results,
+    template_title: (tpl.results[0] as { title?: string } | undefined)?.title ?? null,
   });
 });
 
@@ -120,20 +119,26 @@ type TargetInput = {
   extra?: Record<string, string>;
 };
 
-async function rulesFor(c: Context<AppEnv>, accountIds: number[]) {
-  if (!accountIds.length) return new Map<string, number>();
+/** Active member handlers per account. */
+async function handlersFor(c: Context<AppEnv>, accountIds: number[]) {
+  const map = new Map<number, number[]>();
+  if (!accountIds.length) return map;
   const { results } = await c.env.DB.prepare(
-    `SELECT account_id, role, profile_id FROM assignment_rules WHERE account_id IN (${accountIds.map(() => "?").join(",")})`,
+    `SELECT h.account_id, h.profile_id FROM account_handlers h JOIN profiles p ON p.id = h.profile_id
+      WHERE p.active = 1 AND p.role = 'member' AND h.account_id IN (${accountIds.map(() => "?").join(",")})`,
   )
     .bind(...accountIds)
-    .all<{ account_id: number; role: string; profile_id: number }>();
-  return new Map(results.map((r) => [`${r.account_id}:${r.role}`, r.profile_id]));
+    .all<{ account_id: number; profile_id: number }>();
+  for (const r of results) map.set(r.account_id, [...(map.get(r.account_id) ?? []), r.profile_id]);
+  return map;
 }
 
-function targetInsert(c: Context<AppEnv>, postId: number, t: TargetInput, rules: Map<string, number>) {
+/** When an account has exactly one handler, they post it by default. */
+function targetInsert(c: Context<AppEnv>, postId: number, t: TargetInput, handlers: Map<number, number[]>) {
   const accountId = optNum(t.account_id);
   if (!accountId) bad("Each target needs an account");
-  const manager = t.manager_id !== undefined ? optNum(t.manager_id) : (rules.get(`${accountId}:manager`) ?? null);
+  const hs = handlers.get(accountId) ?? [];
+  const manager = t.manager_id !== undefined ? optNum(t.manager_id) : hs.length === 1 ? hs[0] : null;
   return c.env.DB.prepare(
     "INSERT INTO post_targets (post_id, account_id, body_override, extra, scheduled_at, manager_id) VALUES (?,?,?,?,?,?)",
   ).bind(
@@ -146,6 +151,22 @@ function targetInsert(c: Context<AppEnv>, postId: number, t: TargetInput, rules:
   );
 }
 
+/** Active templates members can start a post from. Admins edit them under /admin/templates. */
+posts.get("/templates", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.title, t.body, t.notes, t.weekdays, t.time, t.timezone, t.writer_id, t.creative_id,
+            (SELECT GROUP_CONCAT(account_id) FROM template_accounts WHERE template_id = t.id) AS account_ids
+       FROM templates t WHERE t.deleted_at IS NULL AND t.active = 1 ORDER BY t.title`,
+  ).all<{ weekdays: string; account_ids: string | null }>();
+  return c.json(
+    results.map((t) => ({
+      ...t,
+      weekdays: JSON.parse(t.weekdays || "[]"),
+      account_ids: (t.account_ids ?? "").split(",").filter(Boolean).map(Number),
+    })),
+  );
+});
+
 posts.post("/posts", async (c) => {
   const me = c.get("profile");
   const b = await body<{
@@ -157,26 +178,31 @@ posts.post("/posts", async (c) => {
     copy_due?: number | null;
     media_due?: number | null;
     targets?: TargetInput[];
+    template_id?: number | null;
   }>(c);
   const title = optStr(b.title, 300)?.trim();
+  const templateId = optNum(b.template_id) ?? null;
+  if (templateId) {
+    const tpl = await c.env.DB.prepare("SELECT 1 FROM templates WHERE id = ? AND deleted_at IS NULL AND active = 1").bind(templateId).first();
+    if (!tpl) bad("That template is no longer available");
+  }
   if (!title) bad("Title is required");
   const targets = b.targets ?? [];
   const accountIds = [...new Set(targets.map((t) => Number(t.account_id)))];
   if (accountIds.length !== targets.length) bad("Each account can only be targeted once per post");
-  const rules = await rulesFor(c, accountIds);
-  const firstAcc = accountIds[0];
-  const writer = b.writer_id !== undefined ? optNum(b.writer_id) : (rules.get(`${firstAcc}:writer`) ?? me.id);
-  const creative = b.creative_id !== undefined ? optNum(b.creative_id) : (rules.get(`${firstAcc}:creative`) ?? null);
+  const handlers = await handlersFor(c, accountIds);
+  const writer = b.writer_id !== undefined ? optNum(b.writer_id) : me.id;
+  const creative = b.creative_id !== undefined ? optNum(b.creative_id) : null;
   await assertMembers(c, writer, creative, ...targets.map((t) => optNum(t.manager_id)));
   const t = now();
   const post = await c.env.DB.prepare(
-    `INSERT INTO posts (title, body, notes, created_by, writer_id, creative_id, copy_due, media_due, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+    `INSERT INTO posts (title, body, notes, created_by, writer_id, creative_id, copy_due, media_due, template_id, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
   )
-    .bind(title, optStr(b.body) ?? "", optStr(b.notes) ?? null, me.id, writer ?? null, creative ?? null, optNum(b.copy_due) ?? null, optNum(b.media_due) ?? null, t, t)
+    .bind(title, optStr(b.body) ?? "", optStr(b.notes) ?? null, me.id, writer ?? null, creative ?? null, optNum(b.copy_due) ?? null, optNum(b.media_due) ?? null, templateId, t, t)
     .first<{ id: number }>();
-  if (targets.length) await c.env.DB.batch(targets.map((tg) => targetInsert(c, post!.id, tg, rules)));
-  await audit(c, "post", post!.id, "create", { title, targets: accountIds.length });
+  if (targets.length) await c.env.DB.batch(targets.map((tg) => targetInsert(c, post!.id, tg, handlers)));
+  await audit(c, "post", post!.id, "create", { title, targets: accountIds.length, ...(templateId && { from_template: templateId }) });
   return c.json(post, 201);
 });
 
@@ -257,9 +283,9 @@ posts.post("/posts/:id/targets", async (c) => {
   await loadPost(c, id);
   const b = await body<TargetInput>(c);
   await assertMembers(c, optNum(b.manager_id));
-  const rules = await rulesFor(c, [Number(b.account_id)]);
+  const handlers = await handlersFor(c, [Number(b.account_id)]);
   try {
-    await targetInsert(c, id, b, rules).run();
+    await targetInsert(c, id, b, handlers).run();
   } catch (e) {
     if (String(e).includes("UNIQUE")) bad("That account is already on this post", 409);
     throw e;
@@ -353,7 +379,6 @@ posts.post("/posts/:id/status", async (c) => {
   let moved = 0;
   const skipped: string[] = [];
   for (const t of results) {
-    if (t.status === "cancelled" && to !== "not_ready") continue;
     const r = await applyStatus(c, t, to);
     if (r.ok) moved++;
     else skipped.push(r.reason);

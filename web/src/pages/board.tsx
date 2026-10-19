@@ -18,7 +18,8 @@ import { isOverdue, TargetCard } from "@/components/target-card";
 import { canTransition, OPEN_STATUSES, STATUS_LABEL, STATUSES, type Status } from "../../../shared/rules";
 
 const VIEWS = {
-  upcoming: "Next 14 days",
+  soon: "Today & tomorrow",
+  upcoming: "Next 7 days",
   overdue: "Overdue",
   unassigned: "No manager",
   unscheduled: "No date",
@@ -28,7 +29,7 @@ type View = keyof typeof VIEWS;
 
 export function BoardPage() {
   const [sp, setSp] = useSearchParams();
-  const view: View = (sp.get("view") as View) in VIEWS ? (sp.get("view") as View) : "upcoming";
+  const view: View = (sp.get("view") as View) in VIEWS ? (sp.get("view") as View) : "soon"; // default: today and tomorrow
   const [showDone, setShowDone] = useState(false);
   const [over, setOver] = useState<Status | null>(null);
   const f = useFilters();
@@ -37,13 +38,14 @@ export function BoardPage() {
   const open = `status=${OPEN_STATUSES.join(",")}`;
 
   const query = {
-    upcoming: `from=${today}&to=${addDays(new Date(today), 14).getTime()}`,
+    soon: `from=${today}&to=${addDays(new Date(today), 2).getTime()}`, // start of today until the end of tomorrow
+    upcoming: `from=${today}&to=${addDays(new Date(today), 7).getTime()}`, // today plus the next 6 days
     overdue: `to=${Date.now()}&${open}`,
     unassigned: open,
     unscheduled: "unscheduled=1",
     all: open,
   }[view];
-  const q = useQuery({ queryKey: ["targets", "board", view], queryFn: () => api<TargetRow[]>(`/targets?${query}`) });
+  const q = useQuery({ queryKey: ["targets", "board", view, today], queryFn: () => api<TargetRow[]>(`/targets?${query}`) });
   let rows = f.apply(q.data ?? []);
   if (view === "unassigned") rows = rows.filter((t) => !t.manager_id);
   if (view === "overdue") rows = rows.filter(isOverdue);

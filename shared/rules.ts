@@ -4,44 +4,28 @@
 export const ROLES = ["admin", "member"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const STATUSES = [
-  "not_ready",
-  "working",
-  "waiting_review",
-  "changes_requested",
-  "scheduled",
-  "posted",
-  "cancelled",
-] as const;
+/** A deliberately simple flow: not ready -> working -> scheduled -> posted, or cancelled. */
+export const STATUSES = ["not_ready", "working", "scheduled", "posted", "cancelled"] as const;
 export type Status = (typeof STATUSES)[number];
 
 export const STATUS_LABEL: Record<Status, string> = {
   not_ready: "Not ready",
   working: "Working",
-  waiting_review: "Waiting for review",
-  changes_requested: "Changes requested",
   scheduled: "Scheduled",
   posted: "Posted",
   cancelled: "Cancelled",
 };
 
-/** Which statuses each status may move to. */
-export const TRANSITIONS: Record<Status, Status[]> = {
-  not_ready: ["working", "waiting_review", "cancelled"],
-  working: ["not_ready", "waiting_review", "cancelled"],
-  waiting_review: ["working", "changes_requested", "scheduled", "cancelled"],
-  changes_requested: ["working", "waiting_review", "cancelled"],
-  scheduled: ["posted", "changes_requested", "waiting_review", "cancelled"],
-  posted: ["scheduled"],
-  cancelled: ["not_ready"],
-};
+/** Any status can move to any other: there is no review gate. */
+export const TRANSITIONS: Record<Status, Status[]> = Object.fromEntries(
+  STATUSES.map((s) => [s, STATUSES.filter((t) => t !== s)]),
+) as Record<Status, Status[]>;
 
-export const OPEN_STATUSES: Status[] = ["not_ready", "working", "waiting_review", "changes_requested", "scheduled"];
+export const OPEN_STATUSES: Status[] = ["not_ready", "working", "scheduled"];
 
 export function canTransition(from: Status, to: Status): { ok: true } | { ok: false; reason: string } {
-  if (!TRANSITIONS[from].includes(to)) {
-    return { ok: false, reason: `Cannot go from ${STATUS_LABEL[from]} to ${STATUS_LABEL[to]}` };
-  }
+  if (!STATUSES.includes(to)) return { ok: false, reason: "Unknown status" };
+  if (from === to) return { ok: false, reason: `Already ${STATUS_LABEL[to]}` };
   return { ok: true };
 }
 
@@ -49,7 +33,7 @@ export const isAdmin = (a: { role: Role }) => a.role === "admin";
 export const isMember = (a: { role: Role }) => a.role === "member";
 
 /** Rank used to derive one overall status from many targets (lowest wins). */
-const RANK: Status[] = ["not_ready", "working", "changes_requested", "waiting_review", "scheduled", "posted"];
+const RANK: Status[] = ["not_ready", "working", "scheduled", "posted"];
 export function overallStatus(statuses: Status[]): Status {
   const live = statuses.filter((s) => s !== "cancelled");
   if (live.length === 0) return statuses.length ? "cancelled" : "not_ready";

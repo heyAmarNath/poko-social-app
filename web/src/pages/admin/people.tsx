@@ -30,7 +30,7 @@ export function PeoplePage() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="People"
-        description="Members write, design, review and publish content. Admins only manage this settings area."
+        description="Members write, design, schedule and publish content. Admins only manage this settings area."
         actions={<Button onClick={() => setEditing({ role: "member", avatar_color: COLORS[people.length % COLORS.length], active: 1 })}><Plus /> Add person</Button>}
       />
       <Card className="py-0">
@@ -76,7 +76,7 @@ function PersonDialog({ initial, onClose }: { initial: Partial<Person>; onClose:
     const ok = await attempt(async () => {
       await api(isNew ? "/admin/profiles" : `/admin/profiles/${f.id}`, { method: isNew ? "POST" : "PATCH", json });
       await qc.invalidateQueries({ queryKey: ["profiles"] });
-      await qc.invalidateQueries({ queryKey: ["rules"] });
+      await qc.invalidateQueries({ queryKey: ["handlers"] });
     }, isNew ? "Person added" : "Saved");
     setBusy(false);
     if (ok) onClose();
@@ -112,7 +112,7 @@ function PersonDialog({ initial, onClose }: { initial: Partial<Person>; onClose:
               <ToggleGroupItem value="admin" className="flex-1"><ShieldCheck /> Admin</ToggleGroupItem>
             </ToggleGroup>
             <FieldDescription>
-              {f.role === "admin" ? "Manages people, accounts, assignments and platforms. Can't write or publish posts." : "Can do all content work: write, add media, review, schedule and mark posted."}
+              {f.role === "admin" ? "Manages people, accounts and their managers, templates and platforms. Can't write or publish posts." : "Can do all content work: write, add media, schedule and mark posted."}
             </FieldDescription>
           </Field>
           <Field>

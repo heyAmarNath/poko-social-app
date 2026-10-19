@@ -6,11 +6,11 @@ import { DayPage } from "@/pages/day";
 import { BoardPage } from "@/pages/board";
 import { MyWorkPage } from "@/pages/my-work";
 import { PostPage } from "@/pages/post";
-import { AssignmentsPage } from "@/pages/admin/assignments";
 import { AccountsPage } from "@/pages/admin/accounts";
 import { PlatformsPage } from "@/pages/admin/platforms";
 import { PeoplePage } from "@/pages/admin/people";
 import { BackupPage } from "@/pages/admin/backup";
+import { TemplatesPage } from "@/pages/admin/templates";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function App() {
@@ -28,8 +28,9 @@ export function App() {
     return (
       <Routes>
         <Route element={<AppShell />}>
-          <Route path="admin/assignments" element={<AssignmentsPage />} />
+          <Route path="admin/assignments" element={<Navigate to="/admin/accounts" replace />} />
           <Route path="admin/accounts" element={<AccountsPage />} />
+          <Route path="admin/templates" element={<TemplatesPage />} />
           <Route path="admin/platforms" element={<PlatformsPage />} />
           <Route path="admin/people" element={<PeoplePage />} />
           <Route path="admin/backup" element={<BackupPage />} />

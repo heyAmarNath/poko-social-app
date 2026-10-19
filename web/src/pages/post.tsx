@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Copy, ExternalLink, History, MessageSquare, MoreHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, ExternalLink, MessageSquare, MoreHorizontal, PenLine, Repeat, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { accountName, useMembers, usePeopleMap, usePlatforms, usePostableAccounts, useRefresh } from "@/lib/data";
-import { fmtDateTime, inZone, parseYmd } from "@/lib/dates";
+import { accountName, useAccounts, useMembers, usePeopleMap, usePlatforms, usePostableAccounts, usePostTemplates, useRefresh } from "@/lib/data";
+import { AccountPicker } from "@/components/account-picker";
+import { fmtDateTime, fmtDay, inZone, parseYmd, ymd } from "@/lib/dates";
 import { attempt } from "@/lib/errors";
-import type { Account, PostDetail, TargetRow } from "@/lib/types";
+import type { PostDetail, TargetRow, TemplateSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,9 +33,11 @@ import { Confirm } from "@/components/confirm";
 import { DateTimePicker } from "@/components/date-picker";
 import { MediaPanel, type PendingMedia } from "@/components/media-panel";
 import { PersonAvatar, PersonSelect } from "@/components/people";
-import { PlatformDot, PlatformLabel } from "@/components/platform";
+import { PlatformLabel } from "@/components/platform";
 import { StatusBadge, StatusDot, StatusMenu } from "@/components/status";
 import { overallStatus, STATUS_LABEL, STATUSES, type Status } from "../../../shared/rules";
+import { describeSchedule, zonedToEpoch } from "../../../shared/schedule";
+import { PlatformIcon } from "@/components/platform";
 
 const chars = (s: string) => [...s].length;
 
@@ -48,73 +52,134 @@ function CharCount({ text, limit }: { text: string; limit: number | null }) {
 
 export function PostPage() {
   const { id } = useParams();
-  return id ? <EditPost key={id} id={Number(id)} /> : <NewPost />;
+  return id ? <EditPost key={id} id={Number(id)} /> : <NewPostFlow />;
 }
 
-// ---------------- account picker ----------------
+// ---------------- choose: scratch or template ----------------
 
-/** Accounts grouped by account name, each with its platforms as toggles. */
-function AccountPicker({ selected, onChange, exclude = [] }: { selected: number[]; onChange: (ids: number[]) => void; exclude?: number[] }) {
-  const accounts = usePostableAccounts().filter((a) => !exclude.includes(a.id));
-  const groups = new Map<string, Account[]>();
-  for (const a of accounts) groups.set(accountName(a), [...(groups.get(accountName(a)) ?? []), a]);
-  if (!groups.size)
-    return <p className="text-sm text-muted-foreground">{exclude.length ? "Every account is already on this post." : "No accounts yet. Ask an admin to add them."}</p>;
-  const toggle = (ids: number[], on: boolean) => onChange(on ? [...new Set([...selected, ...ids])] : selected.filter((x) => !ids.includes(x)));
+/** The day being planned: ?date=YYYY-MM-DD, or tomorrow. */
+function planDate(sp: URLSearchParams) {
+  return sp.get("date") ? parseYmd(sp.get("date")) : new Date(Date.now() + 86_400_000);
+}
+
+/**
+ * "Plan a post" first asks whether to start blank or from a template.
+ * The choice lives in the URL (?start=scratch or ?template=ID) so Back returns here.
+ */
+function NewPostFlow() {
+  const [sp, setSp] = useSearchParams();
+  const templates = usePostTemplates();
+  const accountsLoading = useAccounts().isPending; // a template preselects accounts, so they must be loaded first
+  const chosenId = Number(sp.get("template")) || null;
+  const choose = (patch: Record<string, string | null>) => {
+    const n = new URLSearchParams(sp);
+    for (const [k, v] of Object.entries(patch)) v === null ? n.delete(k) : n.set(k, v);
+    setSp(n);
+  };
+
+  if (templates.isPending || accountsLoading)
+    return (
+      <div className="mx-auto max-w-4xl space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid gap-4 sm:grid-cols-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-40 rounded-xl" />)}</div>
+      </div>
+    );
+  const list = templates.data ?? [];
+  const chosen = chosenId ? list.find((t) => t.id === chosenId) : undefined;
+
+  if (chosen) return <NewPost key={chosen.id} template={chosen} onChangeTemplate={() => choose({ template: null })} />;
+  // No templates yet (or explicitly chose a blank post): straight to the form.
+  if (sp.get("start") === "scratch" || list.length === 0) return <NewPost key="scratch" onChangeTemplate={list.length ? () => choose({ start: null }) : undefined} />;
+  return <StartChooser templates={list} day={planDate(sp)} hasDate={!!sp.get("date")} onScratch={() => choose({ start: "scratch" })} onTemplate={(id) => choose({ template: String(id), start: null })} />;
+}
+
+function StartChooser({
+  templates, day, hasDate, onScratch, onTemplate,
+}: { templates: TemplateSummary[]; day: Date; hasDate: boolean; onScratch: () => void; onTemplate: (id: number) => void }) {
+  const nav = useNavigate();
+  const accounts = usePostableAccounts();
+  const people = usePeopleMap();
   return (
-    <div className="divide-y rounded-lg border">
-      {[...groups].map(([name, list]) => {
-        const ids = list.map((a) => a.id);
-        const all = ids.every((i) => selected.includes(i));
-        const some = !all && ids.some((i) => selected.includes(i));
-        return (
-          <div key={name} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3">
-            <Label className="w-40 shrink-0 cursor-pointer">
-              <Checkbox checked={all ? true : some ? "indeterminate" : false} onCheckedChange={(v) => toggle(ids, !!v)} />
-              {name}
-            </Label>
-            <div className="flex flex-wrap gap-1.5">
-              {list.map((a) => {
-                const on = selected.includes(a.id);
-                return (
-                  <Button key={a.id} type="button" size="sm" variant={on ? "secondary" : "outline"} onClick={() => toggle([a.id], !on)}
-                    className={cn(on && "ring-1 ring-ring/40")} title={a.handle}>
-                    <PlatformDot color={a.platform_color} />
-                    {a.platform_name}
-                    <span className="max-w-28 truncate text-muted-foreground">{a.handle}</span>
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-6 flex items-center gap-2">
+        <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft /></Button>
+        <div>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Plan a post</h1>
+          <p className="text-sm text-muted-foreground">{hasDate ? `For ${fmtDay(day)}. ` : ""}Start with a blank post or one of your team's templates.</p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onScratch}
+        className="group mb-8 flex w-full items-center gap-4 rounded-xl border bg-card p-5 text-left transition hover:border-foreground/20 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><PenLine className="size-5" /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">Write from scratch</span>
+          <span className="block text-sm text-muted-foreground">A blank post. Pick the accounts, write the text and add media yourself.</span>
+        </span>
+        <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      </button>
+
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground"><Repeat className="size-4" /> Or start from a template</h2>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {templates.map((t) => {
+          const accs = accounts.filter((a) => t.account_ids.includes(a.id));
+          const names = [...new Set(accs.map(accountName))];
+          const writer = t.writer_id ? people.get(t.writer_id) : null;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onTemplate(t.id)}
+              className="group flex flex-col rounded-xl border bg-card p-4 text-left transition hover:border-foreground/20 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex items-start justify-between gap-2">
+                <span className="font-medium">{t.title}</span>
+                <span className="shrink-0 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">Use template →</span>
+              </span>
+              <span className="mt-0.5 text-xs text-muted-foreground">{describeSchedule(t.weekdays, t.time)}</span>
+              <span className="mt-3 line-clamp-2 min-h-10 text-sm text-muted-foreground">{t.body || <em>No starting text</em>}</span>
+              <span className="mt-4 flex items-center justify-between gap-2 border-t pt-3">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {accs.slice(0, 6).map((a) => <PlatformIcon key={a.id} k={a.platform_key} name={a.platform_name} color={a.platform_color} className="size-4" />)}
+                  <span className="truncate text-xs text-muted-foreground">{names.join(", ") || "No accounts"}</span>
+                </span>
+                {writer && <PersonAvatar person={writer} size="sm" label="Writer" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 // ---------------- new ----------------
 
-function NewPost() {
+function NewPost({ template, onChangeTemplate }: { template?: TemplateSummary; onChangeTemplate?: () => void }) {
   const [sp] = useSearchParams();
   const nav = useNavigate();
   const members = useMembers();
   const accounts = usePostableAccounts();
   const platforms = usePlatforms().data ?? [];
   const refresh = useRefresh();
+  // A template brings its own time of day (in its timezone) for the day being planned.
   const defaultTime = useMemo(() => {
-    const d = sp.get("date") ? parseYmd(sp.get("date")) : new Date(Date.now() + 86_400_000);
+    const d = planDate(sp);
+    if (template) return zonedToEpoch(ymd(d), template.time, template.timezone);
     d.setHours(10, 0, 0, 0);
     return d.getTime();
-  }, [sp]);
+  }, [sp, template]);
 
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [notes, setNotes] = useState("");
+  const [title, setTitle] = useState(template?.title ?? "");
+  const [body, setBody] = useState(template?.body ?? "");
+  const [notes, setNotes] = useState(template?.notes ?? "");
   const [when, setWhen] = useState<number | null>(defaultTime);
-  const [selected, setSelected] = useState<number[]>([]);
-  const [writer, setWriter] = useState<number | null | undefined>(undefined);
-  const [creative, setCreative] = useState<number | null | undefined>(undefined);
+  const [selected, setSelected] = useState<number[]>(() => (template ? accounts.filter((a) => template.account_ids.includes(a.id)).map((a) => a.id) : []));
+  const [writer, setWriter] = useState<number | null | undefined>(template?.writer_id ?? undefined);
+  const [creative, setCreative] = useState<number | null | undefined>(template?.creative_id ?? undefined);
   const [copyDue, setCopyDue] = useState<number | null>(null);
   const [mediaDue, setMediaDue] = useState<number | null>(null);
   const [pending, setPending] = useState<PendingMedia[]>([]);
@@ -134,6 +199,7 @@ function NewPost() {
           ...(writer !== undefined && { writer_id: writer }),
           ...(creative !== undefined && { creative_id: creative }),
           copy_due: copyDue, media_due: mediaDue,
+          template_id: template?.id ?? null,
           targets: selected.map((account_id) => ({ account_id, scheduled_at: when })),
         },
       });
@@ -149,7 +215,16 @@ function NewPost() {
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft /></Button>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">New post</h1>
+        {!template && onChangeTemplate && <Button variant="ghost" size="sm" className="ml-auto" onClick={onChangeTemplate}><Repeat /> Use a template instead</Button>}
       </div>
+
+      {template && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+          <Repeat className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">Starting from <span className="font-medium">{template.title}</span>. Everything below can be changed.</span>
+          {onChangeTemplate && <Button variant="outline" size="sm" onClick={onChangeTemplate}>Choose another</Button>}
+        </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Content</CardTitle><CardDescription>You can tailor the text per platform after saving.</CardDescription></CardHeader>
@@ -189,11 +264,11 @@ function NewPost() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>People & deadlines</CardTitle><CardDescription>Left blank, these come from the account's assignments.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>People & deadlines</CardTitle><CardDescription>Whoever posts it defaults to the account's manager when it has just one.</CardDescription></CardHeader>
         <CardContent>
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
-            <Field><FieldLabel>Writer</FieldLabel><PersonSelect people={members} value={writer} onChange={setWriter} placeholder="From assignments / me" /></Field>
-            <Field><FieldLabel>Creative (media)</FieldLabel><PersonSelect people={members} value={creative} onChange={setCreative} placeholder="From assignments" /></Field>
+            <Field><FieldLabel>Writer</FieldLabel><PersonSelect people={members} value={writer} onChange={setWriter} placeholder="Me" /></Field>
+            <Field><FieldLabel>Creative (media)</FieldLabel><PersonSelect people={members} value={creative} onChange={setCreative} placeholder="Unassigned" /></Field>
             <Field><FieldLabel>Copy due</FieldLabel><DateTimePicker value={copyDue} onChange={setCopyDue} placeholder="No deadline" /></Field>
             <Field><FieldLabel>Media due</FieldLabel><DateTimePicker value={mediaDue} onChange={setMediaDue} placeholder="No deadline" /></Field>
           </FieldGroup>
@@ -275,6 +350,7 @@ function EditPost({ id }: { id: number }) {
         <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Back"><ArrowLeft /></Button>
         <h1 className="min-w-0 truncate font-heading text-2xl font-semibold tracking-tight">{post.title}</h1>
         <StatusBadge status={overallStatus(post.targets.map((t) => t.status))} />
+        {post.template_title && <Badge variant="secondary"><Repeat /> From template: {post.template_title}</Badge>}
         <div className="ml-auto flex items-center gap-2">
           <Select value="" onValueChange={(v) => bulk(v as Status)}>
             <SelectTrigger className="w-48"><SelectValue placeholder="Move all accounts to…" /></SelectTrigger>
@@ -370,7 +446,6 @@ function EditPost({ id }: { id: number }) {
             </CardContent>
           </Card>
           <Comments post={post} />
-          <HistoryCard post={post} />
         </aside>
       </div>
     </div>
@@ -395,7 +470,7 @@ function TargetEditor({ t, masterBody }: { t: TargetRow; masterBody: string }) {
   return (
     <Card className="gap-4">
       <CardHeader>
-        <CardTitle><PlatformLabel color={t.platform_color} name={t.platform_name} detail={t.handle} /></CardTitle>
+        <CardTitle><PlatformLabel k={t.platform_key} color={t.platform_color} name={t.platform_name} detail={t.handle} /></CardTitle>
         <CardAction className="flex items-center gap-1">
           <StatusMenu target={t} />
           <Confirm title={`Remove ${t.handle} from this post?`} action="Remove"
@@ -469,7 +544,7 @@ function Comments({ post }: { post: PostDetail }) {
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><MessageSquare className="size-4" /> Comments</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {post.comments.length === 0 && <p className="text-sm text-muted-foreground">No comments yet. Leave review feedback here.</p>}
+        {post.comments.length === 0 && <p className="text-sm text-muted-foreground">No comments yet. Leave notes for the team here.</p>}
         {post.comments.map((c) => (
           <div key={c.id} className="group flex gap-2.5">
             <PersonAvatar size="sm" person={me.get(c.author_id) ?? { name: c.author_name ?? "?", avatar_color: c.author_color ?? "#999" }} />
@@ -489,52 +564,4 @@ function Comments({ post }: { post: PostDetail }) {
       </CardContent>
     </Card>
   );
-}
-
-function HistoryCard({ post }: { post: PostDetail }) {
-  const people = usePeopleMap();
-  const [open, setOpen] = useState(false);
-  const items = open ? post.history : post.history.slice(0, 5);
-  return (
-    <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><History className="size-4" /> History</CardTitle></CardHeader>
-      <CardContent>
-        <ol className="relative space-y-4 border-l pl-4">
-          {items.map((h) => (
-            <li key={h.id} className="text-sm">
-              <span className="absolute -left-1 mt-1.5 size-2 rounded-full bg-border" />
-              <span className="font-medium">{h.actor_name ?? "System"}</span> <span className="text-muted-foreground">{describe(h.action, h.detail, people)}</span>
-              <div className="text-xs text-muted-foreground">{fmtDateTime(h.created_at)}</div>
-            </li>
-          ))}
-        </ol>
-        {post.history.length > 5 && (
-          <Button variant="link" size="sm" className="mt-2 px-0" onClick={() => setOpen(!open)}>{open ? "Show less" : `Show all ${post.history.length}`}</Button>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function describe(action: string, detail: string | null, people: Map<number, { name: string }>) {
-  const d = detail ? JSON.parse(detail) : {};
-  const who = (id: number | null) => people.get(id ?? -1)?.name ?? "nobody";
-  switch (action) {
-    case "status": return `moved an account from ${STATUS_LABEL[d.from as Status] ?? d.from} to ${STATUS_LABEL[d.to as Status] ?? d.to}`;
-    case "create": return d.duplicated_from ? "duplicated this post" : "created the post";
-    case "attach": return `attached ${d.filename ?? d.link ?? "a file"}`;
-    case "detach": return `removed ${d.filename}`;
-    case "add_target": return "added an account";
-    case "remove_target": return "removed an account";
-    case "update_target":
-      if (d.manager_id !== undefined) return `set the poster to ${who(d.manager_id)}`;
-      if (d.scheduled_at !== undefined) return `rescheduled to ${d.scheduled_at ? fmtDateTime(d.scheduled_at) : "no time"}`;
-      return "edited an account's text";
-    case "update":
-      if (d.writer_id !== undefined) return `set the writer to ${who(d.writer_id)}`;
-      if (d.creative_id !== undefined) return `set the creative to ${who(d.creative_id)}`;
-      if (d.copy_due !== undefined || d.media_due !== undefined) return "changed a deadline";
-      return "edited the post";
-    default: return action;
-  }
 }

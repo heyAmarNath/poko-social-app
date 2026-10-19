@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 
-const TABLES = ["profiles", "platforms", "accounts", "assignment_rules", "posts", "post_targets", "attachments", "comments", "audit_log"];
+const TABLES = ["profiles", "platforms", "accounts", "account_handlers", "templates", "template_accounts", "template_runs", "posts", "post_targets", "attachments", "comments", "audit_log"];
 const KEEP_DAYS = 30;
 
 /** Nightly JSON snapshot of every table into R2, keeping the last 30 days. */

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "social-pipeline",
+  "name": "poko-social",
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
@@ -10,13 +10,13 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "social_pipeline",
-      // Replace with the id printed by: npx wrangler d1 create social_pipeline
+      "database_name": "poko_social",
+      // Replace with the id printed by: npx wrangler d1 create poko_social
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "social-pipeline-media" }],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "poko-social-media" }],
   "triggers": { "crons": ["0 2 * * *"] },
   "vars": {
     // e.g. "yourteam.cloudflareaccess.com" — required in production

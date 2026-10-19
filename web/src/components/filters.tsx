@@ -2,7 +2,7 @@ import { useSearchParams } from "react-router";
 import { useMembers, usePlatforms } from "@/lib/data";
 import type { TargetRow } from "@/lib/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PlatformDot } from "@/components/platform";
+import { PlatformIcon } from "@/components/platform";
 import { PersonAvatar } from "@/components/people";
 
 const ALL = "__all";
@@ -36,7 +36,7 @@ export function FilterBar({ f }: { f: ReturnType<typeof useFilters> }) {
         <SelectContent>
           <SelectItem value={ALL}>All platforms</SelectItem>
           {platforms.map((p) => (
-            <SelectItem key={p.id} value={String(p.id)}><PlatformDot color={p.color} />{p.name}</SelectItem>
+            <SelectItem key={p.id} value={String(p.id)}><PlatformIcon k={p.key} name={p.name} color={p.color} className="size-4" decorative />{p.name}</SelectItem>
           ))}
         </SelectContent>
       </Select>
