@@ -1,4 +1,8 @@
 # Copy to .dev.vars for local development.
 SESSION_SECRET=dev-only-change-me-0123456789abcdef
-# Skips the Cloudflare Access check locally. Never set this in production.
-DEV_BYPASS_EMAIL=dev@example.com
+# Lets you sign in as any profile on localhost without Google. Never set this in production.
+DEV_LOGIN=1
+# Optional: to try Google sign-in locally, add http://localhost:5173/api/auth/google/callback
+# to the Google client's redirect URIs and fill these in.
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=

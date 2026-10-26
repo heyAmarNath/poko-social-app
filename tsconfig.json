@@ -1,7 +1,21 @@
 {
   "files": [],
-  "references": [{ "path": "./tsconfig.web.json" }, { "path": "./tsconfig.worker.json" }],
+  "references": [
+    {
+      "path": "./tsconfig.web.json"
+    },
+    {
+      "path": "./tsconfig.worker.json"
+    },
+    {
+      "path": "./tsconfig.test.json"
+    }
+  ],
   "compilerOptions": {
-    "paths": { "@/*": ["./web/src/*"] }
+    "paths": {
+      "@/*": [
+        "./web/src/*"
+      ]
+    }
   }
 }

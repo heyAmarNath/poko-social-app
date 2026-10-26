@@ -2,23 +2,23 @@ import type { Role } from "../shared/rules";
 
 export interface Env {
   DB: D1Database;
-  MEDIA: R2Bucket;
-  ASSETS: Fetcher;
   SESSION_SECRET: string;
-  ACCESS_TEAM_DOMAIN: string;
-  ACCESS_AUD: string;
-  DEV_BYPASS_EMAIL?: string;
+  /** The Google sign-in client (Google Cloud Console → Clients). The secret is a Worker secret. */
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+  /** Local development only: lets you sign in as any profile without Google, and only on localhost. */
+  DEV_LOGIN?: string;
 }
 
 export interface Profile {
   id: number;
   name: string;
+  email: string;
   avatar_color: string;
   role: Role;
-  email: string | null;
 }
 
 export type AppEnv = {
   Bindings: Env;
-  Variables: { accessEmail: string; profile: Profile };
+  Variables: { profile: Profile };
 };

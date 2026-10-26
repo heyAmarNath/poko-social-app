@@ -26,7 +26,7 @@ createRoot(document.getElementById("root")!).render(
         <BrowserRouter>
           <TooltipProvider delayDuration={300}>
             <App />
-            <Toaster position="bottom-right" richColors />
+            <Toaster position="top-center" richColors />
           </TooltipProvider>
         </BrowserRouter>
       </QueryClientProvider>

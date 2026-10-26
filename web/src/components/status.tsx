@@ -1,95 +1,57 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { useRefresh } from "@/lib/data";
 import { attempt } from "@/lib/errors";
+import type { PostVersion } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { STATUS_LABEL, TRANSITIONS, type Status } from "../../../shared/rules";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { STATUS_LABEL, STATUSES, type Status } from "../../../shared/rules";
 
-export const STATUS_DOT: Record<Status, string> = {
-  not_ready: "bg-zinc-400",
-  working: "bg-amber-500",
-  scheduled: "bg-sky-500",
-  posted: "bg-emerald-500",
-  cancelled: "bg-zinc-300 dark:bg-zinc-600",
+const DOT: Record<Status, string> = {
+  not_ready: "border-muted-foreground/60",
+  working: "border-amber-500 bg-[linear-gradient(90deg,var(--color-amber-500)_50%,transparent_50%)]",
+  completed: "border-emerald-500 bg-emerald-500",
 };
 
+/** Empty, half or full circle for not ready, working and completed. */
 export function StatusDot({ status, className }: { status: Status; className?: string }) {
-  return <span className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[status], className)} />;
+  return <span aria-hidden className={cn("inline-block size-2.5 shrink-0 rounded-full border-[1.5px]", DOT[status], className)} />;
 }
 
+/** A post's status (it follows its versions), as a dot and a word. */
 export function StatusBadge({ status, className }: { status: Status; className?: string }) {
   return (
-    <Badge variant="outline" className={cn("gap-1.5 font-normal", status === "cancelled" && "text-muted-foreground line-through", className)}>
-      <StatusDot status={status} />
-      {STATUS_LABEL[status]}
-    </Badge>
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground", className)}>
+      <StatusDot status={status} /> {STATUS_LABEL[status]}
+    </span>
   );
 }
 
-/** Status badge that opens a menu of allowed next statuses. Marking as posted asks for the live URL. */
-export function StatusMenu({ target }: { target: { id: number; status: Status } }) {
-  const refresh = useRefresh();
-  const [posting, setPosting] = useState(false);
-  const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
+/** Picks a status. */
+export function StatusSelect({ value, onChange, label, disabled, size = "default", className }: {
+  value: Status; onChange: (s: Status) => void; label: string; disabled?: boolean; size?: "sm" | "default"; className?: string;
+}) {
+  return (
+    <Select value={value} onValueChange={(s) => onChange(s as Status)} disabled={disabled}>
+      <SelectTrigger size={size} aria-label={label} className={cn("w-32", className)}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {STATUSES.map((s) => <SelectItem key={s} value={s}><StatusDot status={s} /> {STATUS_LABEL[s]}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
 
-  const move = async (to: Status, posted_url?: string) => {
+/** A saved version's status. Saves straight away (no Save button), then refreshes every list. */
+export function VersionStatus({ postId, version: v, size, className }: { postId: number; version: PostVersion; size?: "sm" | "default"; className?: string }) {
+  const refresh = useRefresh();
+  const [busy, setBusy] = useState(false);
+  const set = async (to: Status) => {
     setBusy(true);
     await attempt(async () => {
-      await api(`/targets/${target.id}/status`, { method: "POST", json: { status: to, posted_url } });
+      await api(`/posts/${postId}/versions/${v.account_id}/status`, { method: "POST", json: { status: to } });
       refresh();
-    }, `Moved to ${STATUS_LABEL[to]}`);
+    }, `${v.platform_name} ${v.handle}: ${STATUS_LABEL[to]}`);
     setBusy(false);
   };
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={(e) => e.stopPropagation()}
-            className="relative z-10 inline-flex items-center gap-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <StatusBadge status={target.status} className="pr-1.5 hover:bg-muted" />
-            <ChevronDown className="-ml-5 mr-1.5 size-3 text-muted-foreground" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuLabel>Move to</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {TRANSITIONS[target.status].map((s) => (
-            <DropdownMenuItem key={s} onSelect={() => (s === "posted" ? (setUrl(""), setPosting(true)) : move(s))}>
-              <StatusDot status={s} />
-              {STATUS_LABEL[s]}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Dialog open={posting} onOpenChange={setPosting}>
-        <DialogContent onClick={(e) => e.stopPropagation()}>
-          <DialogHeader>
-            <DialogTitle>Mark as posted</DialogTitle>
-            <DialogDescription>Paste the link to the live post so everyone can find it. You can add it later.</DialogDescription>
-          </DialogHeader>
-          <Input autoFocus placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPosting(false)}>Cancel</Button>
-            <Button onClick={() => (setPosting(false), move("posted", url.trim() || undefined))}>Mark as posted</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+  return <StatusSelect value={v.status} onChange={set} disabled={busy} size={size} className={className} label={`${v.platform_name} ${v.handle} status`} />;
 }

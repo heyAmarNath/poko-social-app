@@ -15,7 +15,7 @@ const ICONS: Record<string, IconType> = {
 
 const norm = (s?: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-export function iconFor(k?: string, name?: string): IconType | null {
+function iconFor(k?: string, name?: string): IconType | null {
   return ICONS[norm(k)] ?? ICONS[norm(name)] ?? null;
 }
 
@@ -37,6 +37,7 @@ export function PlatformIcon({
   const Icon = iconFor(k, name);
   const dark = isNearBlack(color);
   const glyph = Icon ? (
+    // oxlint-disable-next-line react/static-components -- Icon is a module-level constant from ICONS, never created during render
     <Icon aria-hidden className={cn("size-3.5 shrink-0", dark && "text-foreground", className)} style={dark ? undefined : { color }} />
   ) : (
     <span aria-hidden className={cn("inline-flex size-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold text-white", className)} style={{ background: color }}>
@@ -47,18 +48,6 @@ export function PlatformIcon({
   return (
     <span role="img" aria-label={name} title={name} className="inline-flex shrink-0">
       {glyph}
-    </span>
-  );
-}
-
-/** Icon plus an optional detail (usually the handle). The platform name shows only as the icon's tooltip. */
-export function PlatformLabel({
-  k, color, name, detail, className,
-}: { k?: string; color: string; name: string; detail?: string; className?: string }) {
-  return (
-    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-sm", className)}>
-      <PlatformIcon k={k} name={name} color={color} />
-      {detail && <span className="truncate text-muted-foreground">{detail}</span>}
     </span>
   );
 }

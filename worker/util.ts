@@ -4,7 +4,7 @@ import type { AppEnv } from "./env";
 
 export const now = () => Date.now();
 
-export function bad(message: string, status: 400 | 401 | 403 | 404 | 409 | 413 | 423 = 400): never {
+export function bad(message: string, status: 400 | 401 | 403 | 404 | 409 | 503 = 400): never {
   throw new HTTPException(status, { message });
 }
 

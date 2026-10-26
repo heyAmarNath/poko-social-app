@@ -1,11 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AtSign, Camera, EyeOff, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
-import { toast } from "sonner";
+import { AtSign, EyeOff, Pencil, Plus, Undo2, X } from "lucide-react";
 import { api } from "@/lib/api";
-import { accountName, useAccounts, useHandlerMap, useHandlers, useMembers, usePeopleMap, usePlatforms } from "@/lib/data";
-import { attempt, errorMessage } from "@/lib/errors";
-import type { Account, Platform } from "@/lib/types";
+import { useBrands, useTeam, usePeopleMap, usePlatforms } from "@/lib/data";
+import { attempt } from "@/lib/errors";
+import type { Account, Brand, Platform } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,29 +17,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AccountAvatar } from "@/components/account-avatar";
 import { Confirm } from "@/components/confirm";
-import { MultiPersonSelect } from "@/components/multi-person-select";
 import { PageHeader } from "@/components/page-header";
-import { PersonAvatar } from "@/components/people";
+import { PersonAvatar, PersonSelect } from "@/components/people";
 import { PlatformIcon } from "@/components/platform";
 import { TimezoneSelect } from "@/components/timezone-select";
-import { normalizeUrl, profileUrl } from "../../../../shared/links";
-
-export type AccountGroup = { name: string; accounts: Account[] };
-
-export function useAccountGroups() {
-  const accounts = useAccounts().data ?? [];
-  return useMemo(() => {
-    const m = new Map<string, Account[]>();
-    for (const a of accounts) m.set(accountName(a), [...(m.get(accountName(a)) ?? []), a]);
-    return [...m].map(([name, accounts]) => ({ name, accounts }));
-  }, [accounts]);
-}
+import { normalizeUrl } from "../../../../shared/links";
 
 export function AccountsPage() {
-  const groups = useAccountGroups();
+  const groups = useBrands().data ?? [];
   const platforms = usePlatforms().data;
-  const handlersLoaded = !!useHandlers().data;
-  const [editing, setEditing] = useState<AccountGroup | "new" | null>(null);
+  const [editing, setEditing] = useState<Brand | "new" | null>(null);
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
@@ -59,7 +45,7 @@ export function AccountsPage() {
         </Empty>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {groups.map((g) => <AccountCard key={g.name} group={g} onEdit={() => setEditing(g)} />)}
+          {groups.map((g) => <AccountCard key={g.id} group={g} onEdit={() => setEditing(g)} />)}
           <button
             type="button"
             onClick={() => setEditing("new")}
@@ -70,18 +56,16 @@ export function AccountsPage() {
           </button>
         </div>
       )}
-      {/* The form copies platforms and managers when it opens, so wait for both. */}
-      {editing && platforms && handlersLoaded && <AccountDialog group={editing === "new" ? null : editing} platforms={platforms} onClose={() => setEditing(null)} />}
+      {/* The form copies the platform list when it opens, so wait for it. */}
+      {editing && platforms && <AccountDialog group={editing === "new" ? null : editing} platforms={platforms} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function AccountCard({ group: g, onEdit }: { group: AccountGroup; onEdit: () => void }) {
-  const handlers = useHandlerMap();
+function AccountCard({ group: g, onEdit }: { group: Brand; onEdit: () => void }) {
   const people = usePeopleMap();
-  const active = g.accounts.some((a) => a.active);
-  const avatar = g.accounts.find((a) => a.avatar_key)?.avatar_key;
-  const who = [...new Set(g.accounts.flatMap((a) => handlers.get(a.id) ?? []))].map((id) => people.get(id)).filter((p) => !!p);
+  const active = !!g.active;
+  const who = [...new Set(g.accounts.map((a) => a.manager_id))].map((id) => id && people.get(id)).filter((p) => !!p);
   return (
     <Card className={cn("group/card relative items-center gap-0 px-4 pt-6 pb-4 text-center transition-shadow hover:shadow-md", !active && "opacity-70")}>
       <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label={`Edit ${g.name}`}
@@ -89,7 +73,7 @@ function AccountCard({ group: g, onEdit }: { group: AccountGroup; onEdit: () => 
         <Pencil />
       </Button>
       <button type="button" onClick={onEdit} className="flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Edit ${g.name}`}>
-        <AccountAvatar name={g.name} avatarKey={avatar} size="xl" />
+        <AccountAvatar name={g.name} size="xl" />
       </button>
       <h3 className="mt-3 max-w-full truncate font-semibold">{g.name}</h3>
       <p className="text-xs text-muted-foreground">
@@ -115,33 +99,22 @@ function AccountCard({ group: g, onEdit }: { group: AccountGroup; onEdit: () => 
 
 /** Round brand-icon button that opens the account's profile in a new tab. */
 function PlatformLink({ account: a }: { account: Account }) {
-  const href = profileUrl(a.platform_key, a.handle, a.url);
-  const icon = <PlatformIcon k={a.platform_key} name={a.platform_name} color={a.platform_color} className="size-5" decorative />;
-  const base = "relative flex size-10 items-center justify-center rounded-full border bg-background transition";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {href ? (
-          <a href={href} target="_blank" rel="noopener noreferrer" aria-label={`Open ${a.platform_name} profile`}
-            className={cn(base, "hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}>
-            {icon}
-            {!a.platform_visible && <EyeOff className="absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full bg-background p-0.5 text-muted-foreground" />}
-          </a>
-        ) : (
-          <span className={cn(base, "cursor-default opacity-50")} aria-label={`${a.platform_name}, no profile link`}>{icon}</span>
-        )}
+        <a href={a.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${a.platform_name} profile`}
+          className="relative flex size-10 items-center justify-center rounded-full border bg-background transition hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <PlatformIcon k={a.platform_key} name={a.platform_name} color={a.platform_color} className="size-5" decorative />
+          {!a.platform_visible && <EyeOff className="absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full bg-background p-0.5 text-muted-foreground" />}
+        </a>
       </TooltipTrigger>
-      <TooltipContent>{href ? `Open on ${a.platform_name}` : `${a.platform_name}: add a profile link to open it`}{!a.platform_visible && " (platform hidden)"}</TooltipContent>
+      <TooltipContent>Open on {a.platform_name}{!a.platform_visible && " (platform hidden)"}</TooltipContent>
     </Tooltip>
   );
 }
 
-/**
- * One platform in the form. Admins only enter the profile link. `legacy` holds the handle of an
- * older entry saved without a link that we can't build one for (e.g. LinkedIn by name), so it is
- * kept until a link is added or the row is removed.
- */
-type Row = { key: string; id?: number; platform: Platform; url: string; legacy: string | null; removed: boolean; managers: number[] };
+/** One platform in the form: the profile link and its manager. */
+type Row = { key: string; id?: number; platform: Platform; url: string; removed: boolean; manager: number | null };
 
 const EXAMPLE: Record<string, string> = {
   x: "https://x.com/yourbrand", facebook: "https://facebook.com/yourpage", instagram: "https://instagram.com/yourbrand",
@@ -149,83 +122,58 @@ const EXAMPLE: Record<string, string> = {
   threads: "https://threads.net/@yourbrand", tiktok: "https://tiktok.com/@yourbrand", youtube: "https://youtube.com/@yourchannel",
 };
 
-/** Rendered only once platforms and managers have loaded: rows are built from them on open, and saving writes managers back. */
-function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | null; platforms: Platform[]; onClose: () => void }) {
+/** Rendered once platforms have loaded: the rows are built from them when the form opens. */
+function AccountDialog({ group, platforms, onClose }: { group: Brand | null; platforms: Platform[]; onClose: () => void }) {
   const qc = useQueryClient();
-  const members = useMembers();
-  const handlers = useHandlerMap();
-  const first = group?.accounts[0];
+  const team = useTeam();
   const [name, setName] = useState(group?.name ?? "");
-  const [timezone, setTimezone] = useState(first?.timezone ?? "");
-  const [notes, setNotes] = useState(first?.notes ?? "");
-  const [active, setActive] = useState(group ? group.accounts.some((a) => a.active) : true);
-  const [avatar, setAvatar] = useState<string | null>(group?.accounts.find((a) => a.avatar_key)?.avatar_key ?? null);
-  const [uploading, setUploading] = useState(false);
+  const [timezone, setTimezone] = useState(group?.timezone ?? "");
+  const [notes, setNotes] = useState(group?.notes ?? "");
+  const [active, setActive] = useState(group ? !!group.active : true);
   const [busy, setBusy] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
 
-  // One row per visible platform, plus any existing handles on hidden platforms.
+  // One row per visible platform, plus any existing profiles on hidden platforms.
   const [rows, setRows] = useState<Row[]>(() => {
     const out: Row[] = [];
     for (const p of platforms) {
       const existing = group?.accounts.filter((a) => a.platform_id === p.id) ?? [];
       if (!p.visible && !existing.length) continue;
       if (existing.length)
-        existing.forEach((a) => {
-          // Older entries may have only a handle: use the link built from it where the platform allows.
-          const link = profileUrl(p.key, a.handle, a.url) ?? "";
-          out.push({ key: `a${a.id}`, id: a.id, platform: p, url: link, legacy: link ? null : a.handle, removed: false, managers: handlers.get(a.id) ?? [] });
-        });
-      else out.push({ key: `p${p.id}`, platform: p, url: "", legacy: null, removed: false, managers: [] });
+        existing.forEach((a) => out.push({ key: `a${a.id}`, id: a.id, platform: p, url: a.url, removed: false, manager: a.manager_id }));
+      else out.push({ key: `p${p.id}`, platform: p, url: "", removed: false, manager: null });
     }
     return out;
   });
   const set = (key: string, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  const isFilled = (r: Row) => !r.removed && (!!r.url.trim() || !!r.legacy);
+  const isFilled = (r: Row) => !r.removed && !!r.url.trim();
   const badLink = (r: Row) => !!r.url.trim() && !normalizeUrl(r.url);
   const filled = rows.filter(isFilled).length;
-
-  const pickAvatar = async (file: File | undefined) => {
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) return void toast.error("Profile pictures can be up to 2 MB");
-    setUploading(true);
-    try {
-      const { key } = await api<{ key: string }>("/admin/account-avatar", { method: "PUT", body: file, headers: { "content-type": file.type } });
-      setAvatar(key);
-    } catch (e) {
-      toast.error(errorMessage(e));
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const save = async () => {
     setBusy(true);
     const ok = await attempt(async () => {
-      await api("/admin/accounts", {
-        method: "PUT",
+      await api(group ? `/admin/brands/${group.id}` : "/admin/brands", {
+        method: group ? "PUT" : "POST",
         json: {
-          name, previous_name: group?.name ?? null, timezone, notes, active, avatar_key: avatar,
+          name, timezone, notes, active,
           entries: rows
             .filter((r) => r.id || isFilled(r))
             .map((r) => ({
-              id: r.id, platform_id: r.platform.id, manager_ids: r.managers,
-              // a removed row sends neither link nor handle, which deletes it
+              id: r.id, platform_id: r.platform.id, manager_id: r.manager,
+              // a saved row sent without a link is deleted
               url: r.removed ? "" : r.url,
-              handle: !r.removed && !r.url.trim() && r.legacy ? r.legacy : undefined,
             })),
         },
       });
-      await qc.invalidateQueries({ queryKey: ["accounts"] });
-      await qc.invalidateQueries({ queryKey: ["handlers"] });
+      await qc.invalidateQueries({ queryKey: ["brands"] });
     }, group ? "Account saved" : "Account added");
     setBusy(false);
     if (ok) onClose();
   };
   const remove = () =>
     attempt(async () => {
-      await api(`/admin/accounts?name=${encodeURIComponent(group!.name)}`, { method: "DELETE" });
-      await qc.invalidateQueries({ queryKey: ["accounts"] });
+      await api(`/admin/brands/${group!.id}`, { method: "DELETE" });
+      await qc.invalidateQueries({ queryKey: ["brands"] });
       onClose();
     }, "Account deleted");
 
@@ -234,34 +182,16 @@ function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | nu
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>{group ? `Edit ${group.name}` : "Add account"}</DialogTitle>
-          <DialogDescription>Paste the profile link for each platform this account uses and pick who manages it. Leave the rest empty.</DialogDescription>
+          <DialogDescription>Paste the profile link for each platform this account uses and pick its manager. Leave the rest empty.</DialogDescription>
         </DialogHeader>
         <FieldGroup>
-          <div className="flex items-center gap-4">
-            <button type="button" onClick={() => fileInput.current?.click()} disabled={uploading} aria-label="Upload profile picture"
-              className="group/avatar relative flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <AccountAvatar name={name || "?"} avatarKey={avatar} size="xl" className={cn(uploading && "opacity-50")} />
-              <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover/avatar:opacity-100">
-                <Camera className="size-5" />
-              </span>
-            </button>
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium">Profile picture</span>
-              <div className="flex gap-2">
-                <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()}>
-                  <Camera /> {uploading ? "Uploading…" : avatar ? "Change" : "Upload"}
-                </Button>
-                {avatar && <Button type="button" size="sm" variant="ghost" onClick={() => setAvatar(null)}><Trash2 /> Remove</Button>}
-              </div>
-              <span className="text-xs text-muted-foreground">PNG, JPG, WebP or GIF up to 2 MB. Without one, initials are shown.</span>
-            </div>
-            <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden
-              onChange={(e) => (pickAvatar(e.target.files?.[0]), (e.target.value = ""))} />
-          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="acc-name">Account name</FieldLabel>
-              <Input id="acc-name" autoFocus placeholder="e.g. Acme" value={name} onChange={(e) => setName(e.target.value)} />
+              <div className="flex items-center gap-3">
+                <AccountAvatar name={name || "?"} />
+                <Input id="acc-name" autoFocus placeholder="e.g. Acme" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
             </Field>
             <Field>
               <FieldLabel>Audience timezone</FieldLabel>
@@ -271,11 +201,11 @@ function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | nu
           <FieldSet>
             <FieldLegend variant="label">Platforms <span className="font-normal text-muted-foreground">· {filled} filled</span></FieldLegend>
             <div className="divide-y rounded-lg border">
-              <div className="hidden grid-cols-[3rem_1fr_11rem_2rem] gap-2 bg-muted/40 px-2.5 py-1.5 text-xs font-medium text-muted-foreground sm:grid">
-                <span /><span>Profile link</span><span>Managed by</span><span />
+              <div className="hidden grid-cols-[3rem_1fr_12rem_2rem] gap-2 bg-muted/40 px-2.5 py-1.5 text-xs font-medium text-muted-foreground sm:grid">
+                <span /><span>Profile link</span><span>Manager</span><span />
               </div>
               {rows.map((r) => (
-                <div key={r.key} className={cn("grid items-center gap-2 p-2.5 grid-cols-[2rem_1fr_2rem] sm:grid-cols-[3rem_1fr_11rem_2rem]", r.removed && "opacity-50")}>
+                <div key={r.key} className={cn("grid items-center gap-2 p-2.5 grid-cols-[2rem_1fr_2rem] sm:grid-cols-[3rem_1fr_12rem_2rem]", r.removed && "opacity-50")}>
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <PlatformIcon k={r.platform.key} name={r.platform.name} color={r.platform.color} className="size-5" />
                     {!r.platform.visible && <EyeOff className="size-3.5 text-muted-foreground" aria-label="Hidden platform" />}
@@ -283,11 +213,11 @@ function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | nu
                   <Input
                     type="url" inputMode="url" autoComplete="off" spellCheck={false}
                     aria-label={`${r.platform.name} profile link`} aria-invalid={badLink(r) || undefined} disabled={r.removed}
-                    placeholder={r.removed ? "Will be removed" : r.legacy ? `Add the link for "${r.legacy}"` : EXAMPLE[r.platform.key] ?? "https://…"}
+                    placeholder={r.removed ? "Will be removed" : EXAMPLE[r.platform.key] ?? "https://…"}
                     value={r.url} onChange={(e) => set(r.key, { url: e.target.value })}
                   />
-                  <MultiPersonSelect compact people={members} value={r.managers} onChange={(ids) => set(r.key, { managers: ids })}
-                    disabled={!isFilled(r)} label={`${r.platform.name} managers`} placeholder="Managers" className="col-span-2 col-start-2 row-start-2 text-xs sm:col-span-1 sm:col-start-auto sm:row-start-auto" />
+                  <PersonSelect people={team} value={r.manager} onChange={(manager) => set(r.key, { manager })} disabled={!isFilled(r)}
+                    placeholder="No manager" label={`${r.platform.name} manager`} className="col-span-2 col-start-2 row-start-2 text-xs sm:col-span-1 sm:col-start-auto sm:row-start-auto" />
                   {r.id ? (
                     <Button type="button" variant="ghost" size="icon-sm" className="col-start-3 row-start-1 sm:col-start-auto sm:row-start-auto"
                       aria-label={r.removed ? `Keep ${r.platform.name}` : `Remove ${r.platform.name}`} title={r.removed ? "Undo remove" : "Remove this platform"}
@@ -300,7 +230,7 @@ function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | nu
               ))}
             </div>
             <FieldDescription>
-              Clicking a platform icon on the account card opens this link. Managers see the account's posts in My work, and a platform with one manager gets them as the default poster.
+              Clicking a platform icon on the account card opens this link. The manager is filled in as "Posted by" on new posts to that platform.
             </FieldDescription>
           </FieldSet>
           <Field>
@@ -309,7 +239,7 @@ function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | nu
           </Field>
           <Field orientation="horizontal">
             <Switch id="acc-active" checked={active} onCheckedChange={setActive} />
-            <FieldLabel htmlFor="acc-active">Active, members can post to it</FieldLabel>
+            <FieldLabel htmlFor="acc-active">Active, the team can post to it</FieldLabel>
           </Field>
         </FieldGroup>
         <DialogFooter className="sm:justify-between">
@@ -320,7 +250,7 @@ function AccountDialog({ group, platforms, onClose }: { group: AccountGroup | nu
           ) : <span />}
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button disabled={busy || uploading || !name.trim() || (!group && !filled) || rows.some((r) => !r.removed && badLink(r))} onClick={save}>{group ? "Save" : "Add account"}</Button>
+            <Button disabled={busy || !name.trim() || (!group && !filled) || rows.some((r) => !r.removed && badLink(r))} onClick={save}>{group ? "Save" : "Add account"}</Button>
           </div>
         </DialogFooter>
       </DialogContent>

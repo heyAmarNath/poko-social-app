@@ -1,45 +1,4 @@
-// Profile links for platform handles.
-
-const USERNAME = /^@?[\w.\-]+$/;
-
-/** Builds a profile URL from a handle for platforms with predictable addresses. */
-function derive(platformKey: string, handle: string): string | null {
-  const h = handle.trim();
-  if (platformKey === "reddit") {
-    const m = h.match(/^\/?(u|r|user)\/([\w\-]+)$/i);
-    if (m) return `https://www.reddit.com/${m[1].toLowerCase() === "r" ? "r" : "user"}/${m[2]}`;
-    return USERNAME.test(h) ? `https://www.reddit.com/user/${h.replace(/^@/, "")}` : null;
-  }
-  if (!USERNAME.test(h)) return null;
-  const u = h.replace(/^@/, "");
-  switch (platformKey) {
-    case "x": case "twitter": return `https://x.com/${u}`;
-    case "instagram": return `https://www.instagram.com/${u}`;
-    case "threads": return `https://www.threads.net/@${u}`;
-    case "tiktok": return `https://www.tiktok.com/@${u}`;
-    case "youtube": return `https://www.youtube.com/@${u}`;
-    case "facebook": return `https://www.facebook.com/${u}`;
-    case "pinterest": return `https://www.pinterest.com/${u}`;
-    case "bluesky": return `https://bsky.app/profile/${u}`;
-    case "twitch": return `https://www.twitch.tv/${u}`;
-    case "telegram": return `https://t.me/${u}`;
-    case "medium": return `https://medium.com/@${u}`;
-    default: return null; // LinkedIn, Discord etc. need the real link
-  }
-}
-
-/** The link to open for an account: the saved profile link, else one built from the handle. */
-export function profileUrl(platformKey: string, handle: string, url: string | null | undefined) {
-  if (url) {
-    try {
-      const p = new URL(url);
-      if (p.protocol === "http:" || p.protocol === "https:") return p.toString();
-    } catch {
-      /* fall through to a derived link */
-    }
-  }
-  return derive(platformKey, handle);
-}
+// Profile links: checking them, and the short handle shown for each.
 
 /** Platforms whose handles read naturally with a leading "@". */
 const AT_PLATFORMS = new Set(["x", "twitter", "instagram", "threads", "tiktok", "youtube", "pinterest", "twitch", "medium", "bluesky"]);

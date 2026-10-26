@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
-import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { fmtDateTime, fmtDay } from "@/lib/dates";
 
@@ -24,14 +23,18 @@ export function DatePicker({ value, onChange, className }: { value: Date; onChan
   );
 }
 
-const timeOf = (ms: number) => {
+/** The times of day the picker offers: every 15 minutes (plus the chosen one, if it's in between). */
+const STEP_MINUTES = 15;
+const minutesOf = (ms: number) => {
   const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d.getHours() * 60 + d.getMinutes();
 };
+const fmtClock = (minutes: number) =>
+  new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /**
- * Date + time picker. Changes are committed when the popover closes, so editing the
- * date and then the time saves once.
+ * Date + time picker: the calendar with the times of day beside it. Changes are committed when the
+ * popover closes, so picking a day and then a time saves once.
  */
 export function DateTimePicker({
   value, onChange, placeholder = "Pick a date & time", disabled, className, defaultTime = "10:00",
@@ -39,18 +42,20 @@ export function DateTimePicker({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<number | null>(value);
   const shown = open ? draft : value;
+  const [dh, dm] = defaultTime.split(":").map(Number);
+  const defaultMinutes = dh * 60 + dm;
 
+  /** A day keeps the chosen time (or the default one). */
   const setDate = (d: Date | undefined) => {
     if (!d) return;
-    const [h, m] = (draft ? timeOf(draft) : defaultTime).split(":").map(Number);
-    d.setHours(h, m, 0, 0);
+    const m = draft === null ? defaultMinutes : minutesOf(draft);
+    d.setHours(Math.floor(m / 60), m % 60, 0, 0);
     setDraft(d.getTime());
   };
-  const setTime = (t: string) => {
-    if (!t) return;
+  /** A time goes on the chosen day (or today). */
+  const setTime = (m: number) => {
     const d = new Date(draft ?? Date.now());
-    const [h, m] = t.split(":").map(Number);
-    d.setHours(h, m, 0, 0);
+    d.setHours(Math.floor(m / 60), m % 60, 0, 0);
     setDraft(d.getTime());
   };
 
@@ -71,9 +76,12 @@ export function DateTimePicker({
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
-          <Calendar mode="single" selected={draft ? new Date(draft) : undefined} defaultMonth={draft ? new Date(draft) : undefined} onSelect={setDate} />
-          <div className="flex items-center gap-2 border-t p-3">
-            <Input type="time" className="w-32" value={draft ? timeOf(draft) : ""} onChange={(e) => setTime(e.target.value)} />
+          <div className="flex max-[359px]:flex-col">
+            <Calendar mode="single" selected={draft ? new Date(draft) : undefined} defaultMonth={draft ? new Date(draft) : undefined} onSelect={setDate} />
+            <TimeList selected={draft === null ? null : minutesOf(draft)} fallback={defaultMinutes} onPick={setTime} />
+          </div>
+          <div className="flex items-center gap-2 border-t py-2 pr-2 pl-3">
+            <span className="text-sm tabular-nums text-muted-foreground">{draft ? fmtDateTime(draft) : "Pick a day and a time"}</span>
             <Button size="sm" className="ml-auto" onClick={() => (draft !== value && onChange(draft), setOpen(false))}>Done</Button>
           </div>
         </PopoverContent>
@@ -83,6 +91,32 @@ export function DateTimePicker({
           <X />
         </Button>
       )}
+    </div>
+  );
+}
+
+/** The times of day as a scrolling column as tall as the calendar, opened at the chosen (or default) time. */
+function TimeList({ selected, fallback, onPick }: { selected: number | null; fallback: number; onPick: (minutes: number) => void }) {
+  const list = useRef<HTMLDivElement>(null);
+  const start = useRef(selected ?? fallback);
+  const times = useMemo(() => {
+    const all = Array.from({ length: (24 * 60) / STEP_MINUTES }, (_, i) => i * STEP_MINUTES);
+    return selected === null || all.includes(selected) ? all : [...all, selected].toSorted((a, b) => a - b);
+  }, [selected]);
+  useEffect(() => {
+    const el = list.current?.querySelector<HTMLElement>(`[data-minutes="${start.current}"]`);
+    if (el && list.current) list.current.scrollTop = el.offsetTop - list.current.clientHeight / 2 + el.clientHeight / 2;
+  }, []);
+  return (
+    <div className="relative w-24 border-l max-[359px]:h-40 max-[359px]:w-auto max-[359px]:border-t max-[359px]:border-l-0">
+      <div ref={list} role="group" aria-label="Time" className="absolute inset-0 flex flex-col gap-0.5 overflow-y-auto p-1">
+        {times.map((m) => (
+          <Button key={m} type="button" size="sm" variant={m === selected ? "default" : "ghost"} aria-pressed={m === selected} data-minutes={m}
+            className="w-full shrink-0 font-normal tabular-nums" onClick={() => onPick(m)}>
+            {fmtClock(m)}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }

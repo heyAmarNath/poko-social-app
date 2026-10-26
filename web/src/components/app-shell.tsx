@@ -1,18 +1,15 @@
-import { useState } from "react";
+import { Suspense } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTheme } from "@/components/theme-provider";
 import {
-  AlertTriangle, AtSign, CalendarDays, ChevronsUpDown, DatabaseBackup, Inbox, KeyRound, KanbanSquare,
-  LayoutGrid, LogOut, Megaphone, Monitor, Moon, Plus, Repeat, Sun, UserX, Users,
+  AtSign, CalendarDays, ChevronsUpDown, Hash, Inbox, LayoutGrid, LogOut, Megaphone, Monitor, Moon, Plus, Sun, Tags, Users,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useMe } from "@/lib/data";
-import { addDays, startOfDay } from "@/lib/dates";
-import { attempt } from "@/lib/errors";
-import type { Dashboard } from "@/lib/types";
+import { useDashboard, useMe, useTopics } from "@/lib/data";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarInset, SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
@@ -21,45 +18,33 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { PinInput } from "@/components/pin-input";
 import { PersonAvatar } from "@/components/people";
 
-type NavItem = { to: string; label: string; icon: typeof CalendarDays; count?: number; tone?: "warn" };
+type NavItem = { to: string; label: string; icon: typeof Hash; count?: number };
+
+const MANAGE: NavItem[] = [
+  { to: "/admin/people", label: "People", icon: Users },
+  { to: "/admin/accounts", label: "Accounts", icon: AtSign },
+  { to: "/admin/topics", label: "Topics", icon: Tags },
+  { to: "/admin/platforms", label: "Platforms", icon: LayoutGrid },
+];
 
 export function AppShell() {
   const me = useMe().data!;
-  const member = me.role === "member";
-  const today = startOfDay(new Date());
-  const dash = useQuery({
-    queryKey: ["dashboard", today.getTime()],
-    queryFn: () => api<Dashboard>(`/dashboard?from=${today.getTime()}&to=${addDays(today, 1).getTime()}`),
-    refetchInterval: 60_000,
-    enabled: member,
-  });
-  const d = dash.data;
+  const loc = useLocation();
+  const topics = useTopics();
+  const d = useDashboard().data;
 
-  const main: NavItem[] = member
-    ? [
-        { to: "/day", label: "Day", icon: CalendarDays, count: d?.today },
-        { to: "/board", label: "Board", icon: KanbanSquare },
-        { to: "/mine", label: "My work", icon: Inbox, count: d?.mine },
-      ]
-    : [
-        { to: "/admin/people", label: "People", icon: Users },
-        { to: "/admin/accounts", label: "Accounts", icon: AtSign },
-        { to: "/admin/templates", label: "Templates", icon: Repeat },
-        { to: "/admin/platforms", label: "Platforms", icon: LayoutGrid },
-        { to: "/admin/backup", label: "Backup", icon: DatabaseBackup },
-      ];
-  const attention: NavItem[] = member
-    ? [
-        ...(d?.overdue ? [{ to: "/board?view=overdue", label: "Overdue", icon: AlertTriangle, count: d.overdue, tone: "warn" as const }] : []),
-        ...(d?.unassigned ? [{ to: "/board?view=unassigned", label: "No manager", icon: UserX, count: d.unassigned, tone: "warn" as const }] : []),
-      ]
-    : [];
-
+  const main: NavItem[] = [
+    // Day opens on today, so its count is today's open posts.
+    { to: "/day", label: "Day", icon: CalendarDays, count: d?.today },
+    { to: "/mine", label: "My work", icon: Inbox, count: d?.all },
+  ];
+  // On a topic's page, a new post starts in that topic.
+  const onTopic = /^\/topics\/(\d+)$/.exec(loc.pathname)?.[1];
+  const newPost = onTopic ? `/posts/new?topic=${onTopic}` : "/posts/new";
+  // Everyone sees every topic, with how many of its posts are still open.
+  const topicItems: NavItem[] = (topics.data ?? []).map((t) => ({ to: `/topics/${t.id}`, label: t.name, icon: Hash, count: t.open_count }));
   return (
     <SidebarProvider>
       <Sidebar collapsible="icon" variant="inset">
@@ -73,7 +58,7 @@ export function AppShell() {
                   </div>
                   <div className="grid flex-1 text-left leading-tight">
                     <span className="truncate font-semibold">Poko Social</span>
-                    <span className="truncate text-xs text-muted-foreground">{member ? "Content" : "Administration"}</span>
+                    <span className="truncate text-xs text-muted-foreground">Content</span>
                   </div>
                 </Link>
               </SidebarMenuButton>
@@ -81,21 +66,20 @@ export function AppShell() {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
-          {member && (
-            <SidebarGroup>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild tooltip="New post" className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground">
-                      <Link to="/posts/new"><Plus /> <span>New post</span></Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )}
-          <NavGroup label={member ? "Plan" : "Manage"} items={main} />
-          {attention.length > 0 && <NavGroup label="Needs attention" items={attention} />}
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="New post" className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground">
+                    <Link to={newPost}><Plus /> <span>New post</span></Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+          <NavGroup label="Posts" items={main} />
+          {me.role === "admin" && <NavGroup label="Manage" items={MANAGE} />}
+          <NavGroup label="Topics" items={topicItems} />
         </SidebarContent>
         <SidebarFooter>
           <UserMenu />
@@ -106,14 +90,16 @@ export function AppShell() {
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
           <span className="text-sm text-muted-foreground">{me.name}</span>
-          {member && (
-            <Button asChild size="sm" className="ml-auto md:hidden">
-              <Link to="/posts/new"><Plus /> New post</Link>
-            </Button>
-          )}
+          <Button asChild size="sm" className="ml-auto md:hidden">
+            <Link to={newPost}><Plus /> New post</Link>
+          </Button>
         </header>
         <div className="min-w-0 flex-1 p-4 md:p-6">
-          <Outlet />
+          <ErrorBoundary key={loc.pathname}>
+            <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+              <Outlet />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </SidebarInset>
     </SidebarProvider>
@@ -122,26 +108,22 @@ export function AppShell() {
 
 function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   const loc = useLocation();
-  const here = loc.pathname + loc.search;
   return (
     <SidebarGroup>
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((it) => {
-            const special = /view=(overdue|unassigned)/.test(loc.search);
-            const active = it.to.includes("?") ? here === it.to : loc.pathname.startsWith(it.to) && !(it.to === "/board" && special);
+            const active = loc.pathname === it.to;
             return (
               <SidebarMenuItem key={it.to}>
                 <SidebarMenuButton asChild isActive={active} tooltip={it.label}>
                   <NavLink to={it.to}>
-                    <it.icon className={it.tone === "warn" ? "text-amber-600 dark:text-amber-400" : undefined} />
+                    <it.icon />
                     <span>{it.label}</span>
                   </NavLink>
                 </SidebarMenuButton>
-                {!!it.count && (
-                  <SidebarMenuBadge className={it.tone === "warn" ? "text-amber-700 dark:text-amber-400" : undefined}>{it.count}</SidebarMenuBadge>
-                )}
+                {!!it.count && <SidebarMenuBadge title={`${it.count} open`}>{it.count}</SidebarMenuBadge>}
               </SidebarMenuItem>
             );
           })}
@@ -151,86 +133,50 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   );
 }
 
-function UserMenu() {
-  const me = useMe().data!;
-  const qc = useQueryClient();
-  const { theme, setTheme } = useTheme();
-  const [pinOpen, setPinOpen] = useState(false);
-  const logout = async () => {
-    await api("/auth/logout", { method: "POST" });
-    await qc.resetQueries();
-  };
-  return (
-    <>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
-                <PersonAvatar person={me} />
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{me.name}</span>
-                  <span className="truncate text-xs capitalize text-muted-foreground">{me.role}</span>
-                </div>
-                <ChevronsUpDown className="ml-auto size-4" />
-              </SidebarMenuButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-56">
-              <DropdownMenuLabel className="font-normal">
-                <div className="text-sm font-medium">{me.name}</div>
-                <div className="text-xs text-muted-foreground">{me.access_email}</div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setPinOpen(true)}><KeyRound /> Change PIN</DropdownMenuItem>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger><Sun /> Theme</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
-                    <DropdownMenuRadioItem value="light"><Sun /> Light</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="dark"><Moon /> Dark</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="system"><Monitor /> System</DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={logout}><LogOut /> Switch profile</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </SidebarMenuItem>
-      </SidebarMenu>
-      <ChangePinDialog open={pinOpen} onOpenChange={setPinOpen} />
-    </>
-  );
+/** A full reload leaves nothing of this person's data in memory, which matters on a shared computer. */
+async function signOut() {
+  await api("/auth/logout", { method: "POST" });
+  window.location.assign("/");
 }
 
-function ChangePinDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const save = async () => {
-    const ok = await attempt(() => api("/me/pin", { method: "POST", json: { current, next } }), "PIN updated");
-    if (ok) (setCurrent(""), setNext(""), onOpenChange(false));
-  };
+function UserMenu() {
+  const me = useMe().data!;
+  const { theme, setTheme } = useTheme();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Change PIN</DialogTitle>
-          <DialogDescription>Your PIN unlocks your profile on this app.</DialogDescription>
-        </DialogHeader>
-        <FieldGroup>
-          <Field>
-            <FieldLabel>Current PIN</FieldLabel>
-            <PinInput value={current} onChange={setCurrent} />
-          </Field>
-          <Field>
-            <FieldLabel>New PIN</FieldLabel>
-            <PinInput value={next} onChange={setNext} />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <Button disabled={current.length !== 4 || next.length !== 4} onClick={save}>Save PIN</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
+              <PersonAvatar person={me} />
+              <div className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">{me.name}</span>
+                <span className="truncate text-xs capitalize text-muted-foreground">{me.role}</span>
+              </div>
+              <ChevronsUpDown className="ml-auto size-4" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-56">
+            <DropdownMenuLabel className="font-normal">
+              <div className="text-sm font-medium">{me.name}</div>
+              <div className="truncate text-xs text-muted-foreground">{me.email}</div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger><Sun /> Theme</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+                  <DropdownMenuRadioItem value="light"><Sun /> Light</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="dark"><Moon /> Dark</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="system"><Monitor /> System</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={signOut}><LogOut /> Sign out</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }

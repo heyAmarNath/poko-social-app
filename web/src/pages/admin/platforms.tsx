@@ -2,14 +2,14 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import { useAccounts, usePlatforms } from "@/lib/data";
+import { useAllAccounts, usePlatforms } from "@/lib/data";
 import { attempt } from "@/lib/errors";
 import type { Platform } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -18,14 +18,14 @@ import { PlatformIcon } from "@/components/platform";
 
 export function PlatformsPage() {
   const platforms = usePlatforms().data ?? [];
-  const accounts = useAccounts().data ?? [];
+  const accounts = useAllAccounts();
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Partial<Platform> | null>(null);
   const toggle = (p: Platform, visible: boolean) =>
     attempt(async () => {
       await api(`/admin/platforms/${p.id}`, { method: "PATCH", json: { visible } });
       await qc.invalidateQueries({ queryKey: ["platforms"] });
-      await qc.invalidateQueries({ queryKey: ["accounts"] });
+      await qc.invalidateQueries({ queryKey: ["brands"] });
     }, `${p.name} is now ${visible ? "shown" : "hidden"}`);
 
   return (
@@ -33,7 +33,7 @@ export function PlatformsPage() {
       <PageHeader
         title="Platforms"
         description="Hidden platforms disappear from account forms, filters and the post editor. Existing posts keep them."
-        actions={<Button onClick={() => setEditing({ color: "#64748b", extra_fields: [], visible: 1 })}><Plus /> Add platform</Button>}
+        actions={<Button onClick={() => setEditing({ color: "#64748b", visible: 1 })}><Plus /> Add platform</Button>}
       />
       <Card className="py-0">
         <Table>
@@ -42,7 +42,6 @@ export function PlatformsPage() {
               <TableHead className="w-20 pl-4">Show</TableHead>
               <TableHead>Platform</TableHead>
               <TableHead>Character limit</TableHead>
-              <TableHead className="hidden md:table-cell">Extra fields</TableHead>
               <TableHead className="hidden sm:table-cell">Accounts</TableHead>
               <TableHead />
             </TableRow>
@@ -55,7 +54,6 @@ export function PlatformsPage() {
                   <span className="flex items-center gap-2"><PlatformIcon k={p.key} name={p.name} color={p.color} className="size-4" />{p.name}</span>
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{p.char_limit?.toLocaleString() ?? "No limit"}</TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">{p.extra_fields.map((x) => x.label).join(", ") || "—"}</TableCell>
                 <TableCell className="hidden tabular-nums text-muted-foreground sm:table-cell">{accounts.filter((a) => a.platform_id === p.id).length}</TableCell>
                 <TableCell className="pr-4 text-right"><Button variant="ghost" size="icon-sm" aria-label={`Edit ${p.name}`} onClick={() => setEditing(p)}><Pencil /></Button></TableCell>
               </TableRow>
@@ -71,15 +69,13 @@ export function PlatformsPage() {
 function PlatformDialog({ initial, onClose }: { initial: Partial<Platform>; onClose: () => void }) {
   const qc = useQueryClient();
   const [f, setF] = useState(initial);
-  const [extras, setExtras] = useState((initial.extra_fields ?? []).map((x) => x.label).join(", "));
   const isNew = !f.id;
   const save = async () => {
-    const extra_fields = extras.split(",").map((s) => s.trim()).filter(Boolean).map((label) => ({ key: label.toLowerCase().replace(/[^a-z0-9]+/g, "_"), label }));
-    const json = { name: f.name, char_limit: f.char_limit || null, color: f.color, visible: !!f.visible, extra_fields };
+    const json = { name: f.name, char_limit: f.char_limit || null, color: f.color, visible: !!f.visible };
     const ok = await attempt(async () => {
       await api(isNew ? "/admin/platforms" : `/admin/platforms/${f.id}`, { method: isNew ? "POST" : "PATCH", json });
       await qc.invalidateQueries({ queryKey: ["platforms"] });
-      await qc.invalidateQueries({ queryKey: ["accounts"] });
+      await qc.invalidateQueries({ queryKey: ["brands"] });
     }, isNew ? "Platform added" : "Saved");
     if (ok) onClose();
   };
@@ -104,11 +100,6 @@ function PlatformDialog({ initial, onClose }: { initial: Partial<Platform>; onCl
           <Field>
             <FieldLabel htmlFor="pf-limit">Character limit</FieldLabel>
             <Input id="pf-limit" type="number" min={1} placeholder="No limit" value={f.char_limit ?? ""} onChange={(e) => setF({ ...f, char_limit: e.target.value ? Number(e.target.value) : null })} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="pf-extra">Extra fields</FieldLabel>
-            <Input id="pf-extra" placeholder="e.g. Subreddit, Post title" value={extras} onChange={(e) => setExtras(e.target.value)} />
-            <FieldDescription>Comma separated. Each post on this platform gets these inputs.</FieldDescription>
           </Field>
           <Field orientation="horizontal">
             <Switch id="pf-visible" checked={!!f.visible} onCheckedChange={(v) => setF({ ...f, visible: v ? 1 : 0 })} />

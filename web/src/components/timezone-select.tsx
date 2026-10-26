@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-export const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export function TimezoneSelect({ value, onChange, allowNone }: { value: string; onChange: (tz: string) => void; allowNone?: boolean }) {
   // The browser's list leaves out "UTC" and some aliases browsers still report (e.g. Asia/Calcutta),

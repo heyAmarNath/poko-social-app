@@ -1,61 +1,37 @@
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
-import { getSignedCookie, setSignedCookie, deleteCookie } from "hono/cookie";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 import type { AppEnv, Profile } from "./env";
 import { bad } from "./util";
-import { isAdmin, isMember } from "../shared/rules";
+import { isAdmin } from "../shared/rules";
 
 const COOKIE = "sp_session";
-const SESSION_MS = 12 * 60 * 60 * 1000; // 12 hours
-const PBKDF2_ITER = 100_000; // Workers' maximum for PBKDF2
-export const MAX_ATTEMPTS = 5;
-export const LOCK_MS = 60_000;
+/** How long a sign-in lasts. Signing out, or a change to the profile's role, email or status, ends it sooner. */
+const SESSION_MS = 30 * 86_400_000;
 
-let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+export const isHttps = (c: Context) => new URL(c.req.url).protocol === "https:";
 
-/** Verifies the Cloudflare Access JWT. Fails closed if Access isn't configured. */
-export const requireAccess = createMiddleware<AppEnv>(async (c, next) => {
-  const bypass = c.env.DEV_BYPASS_EMAIL;
-  const host = new URL(c.req.url).hostname;
-  // The bypass only ever works on localhost, so a leaked dev var can't disable Access in production.
-  if (bypass && (host === "localhost" || host === "127.0.0.1")) {
-    c.set("accessEmail", bypass);
-    return next();
-  }
-  const team = c.env.ACCESS_TEAM_DOMAIN;
-  const aud = c.env.ACCESS_AUD;
-  if (!team || !aud) bad("Cloudflare Access is not configured on this deployment", 403);
-  const token = c.req.header("Cf-Access-Jwt-Assertion");
-  if (!token) bad("Missing Access token", 401);
-  jwks ??= createRemoteJWKSet(new URL(`https://${team}/cdn-cgi/access/certs`));
-  try {
-    const { payload } = await jwtVerify(token, jwks, { issuer: `https://${team}`, audience: aud });
-    c.set("accessEmail", String(payload.email ?? ""));
-  } catch {
-    bad("Invalid Access token", 401);
-  }
-  return next();
-});
+/** The dev sign-in only ever works on localhost, so a leaked dev setting can't open up production. */
+export const devLogin = (c: Context<AppEnv>) =>
+  !!c.env.DEV_LOGIN && ["localhost", "127.0.0.1"].includes(new URL(c.req.url).hostname);
 
-/** Requires a valid profile session (set after PIN entry). */
+/**
+ * Requires a signed-in profile. The cookie carries the profile's session_version, so deactivating a
+ * profile or changing its role or email signs out every session it has.
+ */
 export const requireProfile = createMiddleware<AppEnv>(async (c, next) => {
   const raw = await getSignedCookie(c, c.env.SESSION_SECRET, COOKIE);
-  if (!raw) bad("Choose a profile", 401);
-  const [idStr, expStr] = raw.split(".");
-  if (Number(expStr) < Date.now()) bad("Session expired", 401);
+  if (!raw) bad("Please sign in", 401);
+  const [idStr, versionStr, expStr] = raw.split(".");
+  if (!(Number(expStr) > Date.now())) bad("Your sign-in has expired", 401);
   const row = await c.env.DB.prepare(
-    "SELECT id, name, avatar_color, role, email FROM profiles WHERE id = ? AND active = 1",
+    "SELECT id, name, email, avatar_color, role, session_version FROM profiles WHERE id = ? AND active = 1",
   )
     .bind(Number(idStr))
-    .first<Profile>();
-  if (!row) bad("Profile not found", 401);
-  c.set("profile", row);
-  return next();
-});
-
-/** Content work is for members only; admins just administer. */
-export const requireMember = createMiddleware<AppEnv>(async (c, next) => {
-  if (!isMember(c.get("profile"))) bad("Admins manage settings only. Sign in as a member to work on content.", 403);
+    .first<Profile & { session_version: number }>();
+  if (!row || row.session_version !== Number(versionStr)) bad("Please sign in again", 401);
+  const { session_version: _, ...profile } = row;
+  c.set("profile", profile);
   return next();
 });
 
@@ -64,41 +40,16 @@ export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
   return next();
 });
 
-export async function startSession(c: Parameters<typeof setSignedCookie>[0], secret: string, profileId: number) {
-  await setSignedCookie(c, COOKIE, `${profileId}.${Date.now() + SESSION_MS}`, secret, {
+export async function startSession(c: Context<AppEnv>, profileId: number, sessionVersion: number) {
+  await setSignedCookie(c, COOKIE, `${profileId}.${sessionVersion}.${Date.now() + SESSION_MS}`, c.env.SESSION_SECRET, {
     httpOnly: true,
-    secure: new URL(c.req.url).protocol === "https:",
+    secure: isHttps(c),
     sameSite: "Strict",
     path: "/",
     maxAge: SESSION_MS / 1000,
   });
 }
 
-export function endSession(c: Parameters<typeof deleteCookie>[0]) {
+export function endSession(c: Context<AppEnv>) {
   deleteCookie(c, COOKIE, { path: "/" });
 }
-
-const hex = (buf: ArrayBuffer | Uint8Array) =>
-  [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-const unhex = (s: string) => new Uint8Array(s.match(/../g)!.map((h) => parseInt(h, 16)));
-
-export async function hashPin(pin: string, saltHex?: string) {
-  const salt = saltHex ? unhex(saltHex) : crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PBKDF2_ITER },
-    key,
-    256,
-  );
-  return { hash: hex(bits), salt: hex(salt) };
-}
-
-export async function verifyPin(pin: string, hashHex: string, saltHex: string) {
-  const { hash } = await hashPin(pin, saltHex);
-  if (hash.length !== hashHex.length) return false;
-  let diff = 0;
-  for (let i = 0; i < hash.length; i++) diff |= hash.charCodeAt(i) ^ hashHex.charCodeAt(i);
-  return diff === 0;
-}
-
-export const isValidPin = (pin: unknown): pin is string => typeof pin === "string" && /^\d{4}$/.test(pin);

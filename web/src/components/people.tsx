@@ -31,11 +31,11 @@ export function PersonAvatar({
 const NONE = "__none";
 
 export function PersonSelect({
-  value, onChange, people, placeholder = "Unassigned", disabled, className,
-}: { value: number | null | undefined; onChange: (v: number | null) => void; people: Person[]; placeholder?: string; disabled?: boolean; className?: string }) {
+  value, onChange, people, placeholder = "Unassigned", disabled, className, label,
+}: { value: number | null | undefined; onChange: (v: number | null) => void; people: Person[]; placeholder?: string; disabled?: boolean; className?: string; label?: string }) {
   return (
     <Select value={value === undefined ? "" : value ? String(value) : NONE} onValueChange={(v) => onChange(v === NONE ? null : Number(v))} disabled={disabled}>
-      <SelectTrigger className={cn("w-full", className)}>
+      <SelectTrigger aria-label={label} className={cn("w-full", className)}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>

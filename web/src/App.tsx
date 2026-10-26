@@ -1,17 +1,19 @@
+import { lazy } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { useMe } from "@/lib/data";
 import { AppShell } from "@/components/app-shell";
-import { ProfileSwitcher } from "@/pages/profile-switcher";
-import { DayPage } from "@/pages/day";
-import { BoardPage } from "@/pages/board";
-import { MyWorkPage } from "@/pages/my-work";
-import { PostPage } from "@/pages/post";
-import { AccountsPage } from "@/pages/admin/accounts";
-import { PlatformsPage } from "@/pages/admin/platforms";
-import { PeoplePage } from "@/pages/admin/people";
-import { BackupPage } from "@/pages/admin/backup";
-import { TemplatesPage } from "@/pages/admin/templates";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SignInPage } from "@/pages/sign-in";
+
+// Pages load on first visit, so the first screen only downloads the shell.
+const DayPage = lazy(() => import("@/pages/day").then((m) => ({ default: m.DayPage })));
+const MyWorkPage = lazy(() => import("@/pages/my-work").then((m) => ({ default: m.MyWorkPage })));
+const TopicPage = lazy(() => import("@/pages/topic").then((m) => ({ default: m.TopicPage })));
+const PostPage = lazy(() => import("@/pages/post").then((m) => ({ default: m.PostPage })));
+const AccountsPage = lazy(() => import("@/pages/admin/accounts").then((m) => ({ default: m.AccountsPage })));
+const PlatformsPage = lazy(() => import("@/pages/admin/platforms").then((m) => ({ default: m.PlatformsPage })));
+const PeoplePage = lazy(() => import("@/pages/admin/people").then((m) => ({ default: m.PeoplePage })));
+const TopicsPage = lazy(() => import("@/pages/admin/topics").then((m) => ({ default: m.TopicsPage })));
 
 export function App() {
   const me = useMe();
@@ -21,32 +23,25 @@ export function App() {
         <Skeleton className="h-8 w-40" />
       </div>
     );
-  if (me.isError) return <ProfileSwitcher />;
+  if (me.isError) return <SignInPage />;
 
-  // Admins only administer; members only work on content.
-  if (me.data.role === "admin")
-    return (
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route path="admin/assignments" element={<Navigate to="/admin/accounts" replace />} />
-          <Route path="admin/accounts" element={<AccountsPage />} />
-          <Route path="admin/templates" element={<TemplatesPage />} />
-          <Route path="admin/platforms" element={<PlatformsPage />} />
-          <Route path="admin/people" element={<PeoplePage />} />
-          <Route path="admin/backup" element={<BackupPage />} />
-          <Route path="*" element={<Navigate to="/admin/people" replace />} />
-        </Route>
-      </Routes>
-    );
-
+  // Everyone works on content; admins also get the settings pages.
   return (
     <Routes>
       <Route element={<AppShell />}>
         <Route path="day" element={<DayPage />} />
-        <Route path="board" element={<BoardPage />} />
         <Route path="mine" element={<MyWorkPage />} />
+        <Route path="topics/:id" element={<TopicPage />} />
         <Route path="posts/new" element={<PostPage />} />
         <Route path="posts/:id" element={<PostPage />} />
+        {me.data.role === "admin" && (
+          <>
+            <Route path="admin/people" element={<PeoplePage />} />
+            <Route path="admin/accounts" element={<AccountsPage />} />
+            <Route path="admin/topics" element={<TopicsPage />} />
+            <Route path="admin/platforms" element={<PlatformsPage />} />
+          </>
+        )}
         <Route path="*" element={<Navigate to="/day" replace />} />
       </Route>
     </Routes>

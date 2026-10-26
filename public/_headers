@@ -1,0 +1,11 @@
+# Security headers for the app's pages and assets (applied by Cloudflare Workers static assets).
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: same-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+
+# Built JS, CSS and fonts have a content hash in their names, so browsers can keep them for a year.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -11,18 +11,19 @@
     {
       "binding": "DB",
       "database_name": "poko_social",
-      // Replace with the id printed by: npx wrangler d1 create poko_social
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // The production database, printed by: npx wrangler d1 create poko_social
+      "database_id": "8480bac3-34c7-4697-a6ef-03a0d61e21b2",
+      // Local development (npm run dev, db:*:local) keeps its own database under this id.
+      "preview_database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "poko-social-media" }],
+  // Nightly cleanup (worker/purge.ts) at 02:00 UTC.
   "triggers": { "crons": ["0 2 * * *"] },
   "vars": {
-    // e.g. "yourteam.cloudflareaccess.com" — required in production
-    "ACCESS_TEAM_DOMAIN": "",
-    // Application Audience (AUD) tag from the Access application
-    "ACCESS_AUD": ""
+    // The Google sign-in client (Google Cloud Console → Google Auth Platform → Clients).
+    // Its secret is a Worker secret: npx wrangler secret put GOOGLE_CLIENT_SECRET
+    "GOOGLE_CLIENT_ID": "926953047306-ecnr2joh5mimuk1614uf5b1tgde975a0.apps.googleusercontent.com"
   },
   "observability": { "enabled": true }
 }
